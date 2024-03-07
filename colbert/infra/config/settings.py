@@ -28,6 +28,7 @@ class RunSettings:
     amp: bool = DefaultVal(True)
 
     total_visible_gpus = torch.cuda.device_count()
+    # total_visible_gpus: int = DefaultVal(0)
     gpus: int = DefaultVal(total_visible_gpus)
 
     @property

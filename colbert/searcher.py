@@ -1,5 +1,6 @@
 import os
 import torch
+import json
 
 from tqdm import tqdm
 from typing import Union
@@ -38,6 +39,7 @@ class Searcher:
 
         self.checkpoint = Checkpoint(self.checkpoint, colbert_config=self.config)
         use_gpu = self.config.total_visible_gpus > 0
+        # use_gpu = False
         if use_gpu:
             self.checkpoint = self.checkpoint.cuda()
         self.ranker = IndexScorer(self.index, use_gpu)
@@ -71,6 +73,17 @@ class Searcher:
     def _search_all_Q(self, queries, Q, k, filter_fn=None):
         all_scored_pids = [list(zip(*self.dense_search(Q[query_idx:query_idx+1], k, filter_fn=filter_fn)))
                            for query_idx in tqdm(range(Q.size(0)))]
+        n = Q.size(0)
+        avg_cent_match = self.ranker.tot_time / n
+        avg_cent_size = self.ranker.tot_cells / n
+        print(f"Avg elapsed ms: {avg_cent_match}")
+        print(f"Avg cent retrieved: {avg_cent_size}")
+        centroids_per_query = {}
+        for i, qid in enumerate(queries.keys()):
+            centroids_per_query[qid] = self.ranker.cells_retrieved[i]
+
+        with open("centroids_retrieved.json", "w") as crfs:
+            json.dump(centroids_per_query, crfs)
 
         data = {qid: val for qid, val in zip(queries.keys(), all_scored_pids)}
 

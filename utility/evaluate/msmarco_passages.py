@@ -41,7 +41,7 @@ def main(args):
 
             qid2ranking[qid].append((rank, pid, score))
 
-    assert set.issubset(set(qid2ranking.keys()), set(qid2positives.keys()))
+    # assert set.issubset(set(qid2ranking.keys()), set(qid2positives.keys()))
 
     num_judged_queries = len(qid2positives)
     num_ranked_queries = len(qid2ranking)

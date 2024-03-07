@@ -14,6 +14,7 @@ from colbert.modeling.colbert import colbert_score, colbert_score_packed, colber
 from math import ceil
 
 import os
+import os.path as osp
 import pathlib
 from torch.utils.cpp_extension import load
 
@@ -21,6 +22,15 @@ from torch.utils.cpp_extension import load
 class IndexScorer(IndexLoader, CandidateGeneration):
     def __init__(self, index_path, use_gpu=True):
         super().__init__(index_path=index_path, use_gpu=use_gpu)
+        self.tot_time = 0
+        self.tot_cells = 0
+        self.cells_retrieved = []
+
+        # search params
+        self.query_index = 0
+        self.splade_centroids = torch.load(
+            osp.join(index_path, "splade_centroids_dev_5k_unq_3.pt")
+        )
 
         IndexScorer.try_load_torch_extensions(use_gpu)
 

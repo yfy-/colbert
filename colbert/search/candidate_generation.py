@@ -1,4 +1,5 @@
 import torch
+import time
 
 from colbert.search.strided_tensor import StridedTensor
 from .strided_tensor_core import _create_mask, _create_view
@@ -8,6 +9,8 @@ class CandidateGeneration:
 
     def __init__(self, use_gpu=True):
         self.use_gpu = use_gpu
+        # self.tot_time = 0
+        # self.tot_cells = 0
 
     def get_cells(self, Q, ncells):
         scores = (self.codec.centroids @ Q.T)
@@ -17,6 +20,12 @@ class CandidateGeneration:
             cells = scores.topk(ncells, dim=0, sorted=False).indices.permute(1, 0)  # (32, ncells)
         cells = cells.flatten().contiguous()  # (32 * ncells,)
         cells = cells.unique(sorted=False)
+        return cells, scores
+
+    def get_cells_splade(self, Q, ncells):
+        scores = (self.codec.centroids @ Q.T)
+        cells = self.splade_centroids[self.query_index].flatten().contiguous()
+        self.query_index += 1
         return cells, scores
 
     def generate_candidate_eids(self, Q, ncells):
@@ -29,7 +38,13 @@ class CandidateGeneration:
         return eids, scores
 
     def generate_candidate_pids(self, Q, ncells):
-        cells, scores = self.get_cells(Q, ncells)
+        cand_beg = time.time()
+        cells, scores = self.get_cells_splade(Q, ncells)
+        # cells, scores = self.get_cells(Q, ncells)
+        elapsed_ms = (time.time() - cand_beg) * 1000
+        self.tot_time += elapsed_ms
+        self.tot_cells += len(cells)
+        self.cells_retrieved.append(cells.tolist())
 
         pids, cell_lengths = self.ivf.lookup(cells)
         if self.use_gpu:
