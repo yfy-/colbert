@@ -31,18 +31,24 @@ def _main():
     if unq_pids[sp_cursor].item() == -1:
         sp_cursor += 1
 
+    unq_len = len(unq_pids)
     docid2doc = dict()
     with tqdm(desc="Collect required documents") as pbar:
         for line in args.in_collection:
             docid, doc = line.rstrip().split("\t")
             docid = int(docid)
             pbar.update(1)
+
+            if sp_cursor == unq_len:
+                break
+
             if docid != unq_pids[sp_cursor].item():
                 continue
 
             docid2doc[docid] = doc
             sp_cursor += 1
 
+    args.in_collection.close()
     with tqdm(total=sample_pids.shape[0], desc="Create centroid docs") as pbar:
         for cent_id, docids in enumerate(sample_pids):
             concat_doc = ""
