@@ -1,7 +1,6 @@
 """Create a collection for centroids."""
 
 import argparse
-import logging
 import sys
 
 import torch
@@ -29,29 +28,14 @@ def _main():
     sp_cursor = 0
 
     # First element can be -1 for not found documents
-    if unq_pids[sp_cursor] == -1:
+    if unq_pids[sp_cursor].item() == -1:
         sp_cursor += 1
 
     docid2doc = dict()
-    line_idx = 0
-
     with tqdm(desc="Collect required documents") as pbar:
         for line in args.in_collection:
             docid, doc = line.rstrip().split("\t")
-            try:
-                # Unfortunately have to do this, since the compressed
-                # collection file has an unexpected prefix before the
-                # docid which causes docid to be wrong. In case we cannot
-                # cast that to int we will use the line_idx. This is ok
-                # because docid's already start from 0 and increment by 1.
-                docid = int(docid)
-            except ValueError:
-                logging.warning(
-                    f"{docid} not an int, will use line idx as docid"
-                )
-                docid = line_idx
-
-            line_idx += 1
+            docid = int(docid)
             pbar.update(1)
             if docid != unq_pids[sp_cursor].item():
                 continue
