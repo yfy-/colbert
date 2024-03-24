@@ -173,3 +173,5 @@ class SearchSettings:
     ncells: int = DefaultVal(None)
     centroid_score_threshold: float = DefaultVal(None)
     ndocs: int = DefaultVal(None)
+    precomputed_centroid_path: str = DefaultVal(None)
+    save_centroids: str = DefaultVal(False)

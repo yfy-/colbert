@@ -1,5 +1,6 @@
 import torch
 import time
+from typing import Optional
 
 from colbert.search.strided_tensor import StridedTensor
 from .strided_tensor_core import _create_mask, _create_view
@@ -9,10 +10,8 @@ class CandidateGeneration:
 
     def __init__(self, use_gpu=True):
         self.use_gpu = use_gpu
-        # self.tot_time = 0
-        # self.tot_cells = 0
 
-    def get_cells(self, Q, ncells):
+    def get_cells(self, Q, ncells, qid: Optional[int] = None):
         scores = (self.codec.centroids @ Q.T)
         if ncells == 1:
             cells = scores.argmax(dim=0, keepdim=True).permute(1, 0)
@@ -22,14 +21,15 @@ class CandidateGeneration:
         cells = cells.unique(sorted=False)
         return cells, scores
 
-    def get_cells_splade(self, Q, ncells):
-        scores = (self.codec.centroids @ Q.T)
-        cells = self.splade_centroids[self.query_index].flatten().contiguous()
-        self.query_index += 1
+    def get_cells_precomputed(self, Q, ncells, qid: int):
+        scores = self.codec.centroids @ Q.T
+        cells = (
+            self.precomputed_centroids[qid].flatten().contiguous()
+        )
         return cells, scores
 
     def generate_candidate_eids(self, Q, ncells):
-        cells, scores = self.get_cells(Q, ncells)
+        cells, scores = self.get_cells_func(Q, ncells)
 
         eids, cell_lengths = self.ivf.lookup(cells)  # eids = (packedlen,)  lengths = (32 * ncells,)
         eids = eids.long()
@@ -37,9 +37,9 @@ class CandidateGeneration:
             eids = eids.cuda()
         return eids, scores
 
-    def generate_candidate_pids(self, Q, ncells):
+    def generate_candidate_pids(self, Q, ncells, qid: Optional[int] = None):
         cand_beg = time.time()
-        cells, scores = self.get_cells_splade(Q, ncells)
+        cells, scores = self.get_cells_func(Q, ncells, qid=qid)
         # cells, scores = self.get_cells(Q, ncells)
         elapsed_ms = (time.time() - cand_beg) * 1000
         self.tot_time += elapsed_ms
@@ -57,7 +57,7 @@ class CandidateGeneration:
             E = E.cuda()
         return (Q.unsqueeze(0) @ E.unsqueeze(2)).squeeze(-1).T
 
-    def generate_candidates(self, config, Q):
+    def generate_candidates(self, config, Q, qid: Optional[int] = None):
         ncells = config.ncells
 
         assert isinstance(self.ivf, StridedTensor)
@@ -67,7 +67,7 @@ class CandidateGeneration:
             Q = Q.cuda().half()
         assert Q.dim() == 2
 
-        pids, centroid_scores = self.generate_candidate_pids(Q, ncells)
+        pids, centroid_scores = self.generate_candidate_pids(Q, ncells, qid=qid)
 
         sorter = pids.sort()
         pids = sorter.values

@@ -3,7 +3,7 @@ import torch
 import json
 
 from tqdm import tqdm
-from typing import Union
+from typing import Union, Optional
 
 from colbert.data import Collection, Queries, Ranking
 
@@ -14,10 +14,11 @@ from colbert.infra.provenance import Provenance
 from colbert.infra.run import Run
 from colbert.infra.config import ColBERTConfig, RunConfig
 from colbert.infra.launcher import print_memory_stats
+from colbert.utils.utils import print_message
 
 import time
 
-TextQueries = Union[str, 'list[str]', 'dict[int, str]', Queries]
+TextQueries = Union[str, "list[str]", "dict[int, str]", Queries]
 
 
 class Searcher:
@@ -25,24 +26,34 @@ class Searcher:
         print_memory_stats()
 
         initial_config = ColBERTConfig.from_existing(config, Run().config)
-
         default_index_root = initial_config.index_root_
         self.index = os.path.join(default_index_root, index)
         self.index_config = ColBERTConfig.load_from_index(self.index)
 
         self.checkpoint = checkpoint or self.index_config.checkpoint
-        self.checkpoint_config = ColBERTConfig.load_from_checkpoint(self.checkpoint)
-        self.config = ColBERTConfig.from_existing(self.checkpoint_config, self.index_config, initial_config)
+        self.checkpoint_config = ColBERTConfig.load_from_checkpoint(
+            self.checkpoint
+        )
+        self.config = ColBERTConfig.from_existing(
+            self.checkpoint_config, self.index_config, initial_config
+        )
 
         self.collection = Collection.cast(collection or self.config.collection)
         self.configure(checkpoint=self.checkpoint, collection=self.collection)
 
-        self.checkpoint = Checkpoint(self.checkpoint, colbert_config=self.config)
-        use_gpu = self.config.total_visible_gpus > 0
-        # use_gpu = False
+        self.checkpoint = Checkpoint(
+            self.checkpoint, colbert_config=self.config
+        )
+        use_gpu = self.config.gpus > 0
+        print_message(f"GPU status: {use_gpu}")
         if use_gpu:
             self.checkpoint = self.checkpoint.cuda()
-        self.ranker = IndexScorer(self.index, use_gpu)
+
+        self.ranker = IndexScorer(
+            self.index,
+            use_gpu=use_gpu,
+            precomputed_centroid_path=self.config.precomputed_centroid_path,
+        )
 
         print_memory_stats()
 
@@ -54,7 +65,12 @@ class Searcher:
         bsize = 128 if len(queries) > 128 else None
 
         self.checkpoint.query_tokenizer.query_maxlen = self.config.query_maxlen
-        Q = self.checkpoint.queryFromText(queries, bsize=bsize, to_cpu=True, full_length_search=full_length_search)
+        Q = self.checkpoint.queryFromText(
+            queries,
+            bsize=bsize,
+            to_cpu=True,
+            full_length_search=full_length_search,
+        )
 
         return Q
 
@@ -62,7 +78,13 @@ class Searcher:
         Q = self.encode(text, full_length_search=full_length_search)
         return self.dense_search(Q, k, filter_fn=filter_fn)
 
-    def search_all(self, queries: TextQueries, k=10, filter_fn=None, full_length_search=False):
+    def search_all(
+        self,
+        queries: TextQueries,
+        k=10,
+        filter_fn=None,
+        full_length_search=False,
+    ):
         queries = Queries.cast(queries)
         queries_ = list(queries.values())
 
@@ -71,31 +93,49 @@ class Searcher:
         return self._search_all_Q(queries, Q, k, filter_fn=filter_fn)
 
     def _search_all_Q(self, queries, Q, k, filter_fn=None):
-        all_scored_pids = [list(zip(*self.dense_search(Q[query_idx:query_idx+1], k, filter_fn=filter_fn)))
-                           for query_idx in tqdm(range(Q.size(0)))]
+        qids = list(queries.keys())
+        search_start = time.time()
+        all_scored_pids = [
+            list(
+                zip(
+                    *self.dense_search(
+                        Q[query_idx : query_idx + 1],
+                        k,
+                        filter_fn=filter_fn,
+                        qid=qids[query_idx],
+                    )
+                )
+            )
+            for query_idx in tqdm(range(Q.size(0)))
+        ]
+        elapsed = time.time() - search_start
         n = Q.size(0)
+        print_message(f"Avg retrieval ms: {elapsed * 1000 / n}")
         avg_cent_match = self.ranker.tot_time / n
         avg_cent_size = self.ranker.tot_cells / n
-        print(f"Avg elapsed ms: {avg_cent_match}")
-        print(f"Avg cent retrieved: {avg_cent_size}")
-        centroids_per_query = {}
-        for i, qid in enumerate(queries.keys()):
-            centroids_per_query[qid] = self.ranker.cells_retrieved[i]
+        print_message(f"Avg cent elapsed ms: {avg_cent_match}")
+        print_message(f"Avg cent retrieved: {avg_cent_size}")
+        if self.config.save_centroids is not None:
+            centroids_per_query = {}
+            for i, qid in enumerate(queries.keys()):
+                centroids_per_query[qid] = self.ranker.cells_retrieved[i]
 
-        with open("centroids_retrieved.json", "w") as crfs:
-            json.dump(centroids_per_query, crfs)
+            with Run().open("retrieved_centroids.json", "w") as crfs:
+                json.dump(centroids_per_query, crfs)
 
         data = {qid: val for qid, val in zip(queries.keys(), all_scored_pids)}
 
         provenance = Provenance()
-        provenance.source = 'Searcher::search_all'
+        provenance.source = "Searcher::search_all"
         provenance.queries = queries.provenance()
         provenance.config = self.config.export()
         provenance.k = k
 
         return Ranking(data=data, provenance=provenance)
 
-    def dense_search(self, Q: torch.Tensor, k=10, filter_fn=None):
+    def dense_search(
+        self, Q: torch.Tensor, k=10, filter_fn=None, qid: Optional[int] = None
+    ):
         if k <= 10:
             if self.config.ncells is None:
                 self.configure(ncells=1)
@@ -118,6 +158,8 @@ class Searcher:
             if self.config.ndocs is None:
                 self.configure(ndocs=max(k * 4, 4096))
 
-        pids, scores = self.ranker.rank(self.config, Q, filter_fn=filter_fn)
+        pids, scores = self.ranker.rank(
+            self.config, Q, filter_fn=filter_fn, qid=qid
+        )
 
-        return pids[:k], list(range(1, k+1)), scores[:k]
+        return pids[:k], list(range(1, k + 1)), scores[:k]

@@ -4,11 +4,27 @@ from colbert.data import Queries
 from colbert.infra import Run, RunConfig, ColBERTConfig
 from colbert import Searcher
 
-if __name__=='__main__':
-    with Run().context(RunConfig(nranks=1, experiment="msmarco", name="splade_centroids")):
+if __name__ == "__main__":
+    with Run().context(
+        RunConfig(
+            nranks=1,
+            experiment="msmarco",
+            name="splade_centroids",
+            overwrite=True,
+            # gpus=0,
+        )
+    ):
 
-        config = ColBERTConfig()
-        searcher = Searcher(index="msmarco.nbits=2", config=config)
-        queries = Queries("/home/clownland/Datasets/msmarco/queries_5k.dev.tsv")
-        ranking = searcher.search_all(queries, k=1000)
-        ranking.save("msmarco_dev_5k.nbits=2.ranking.tsv")
+        searcher = Searcher(
+            index="msmarco.nbits=2",
+            config=ColBERTConfig(
+                save_centroids=True,
+                precomputed_centroid_path="splade_distil_dev_small_unq_3.pt",
+            ),
+        )
+        queries = Queries(
+            path="/home/clownland/Datasets/msmarco/ir-datasets/"
+            "queries.dev.small.tsv"
+        )
+        ranking = searcher.search_all(queries, k=10)
+        ranking.save("msmarco_dev_small.nbits=2.ranking.tsv")

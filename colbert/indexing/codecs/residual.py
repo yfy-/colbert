@@ -7,6 +7,7 @@ import torch
 import numpy as np
 from itertools import product
 
+from colbert.infra.run import Run
 from colbert.infra.config import ColBERTConfig
 from colbert.indexing.codecs.residual_embeddings import ResidualEmbeddings
 from colbert.utils.utils import print_message
@@ -19,7 +20,7 @@ class ResidualCodec:
     Embeddings = ResidualEmbeddings
 
     def __init__(self, config, centroids, avg_residual=None, bucket_cutoffs=None, bucket_weights=None):
-        self.use_gpu = config.total_visible_gpus > 0
+        self.use_gpu = config.gpus > 0
 
         ResidualCodec.try_load_torch_extensions(self.use_gpu)
 
@@ -133,7 +134,8 @@ class ResidualCodec:
 
     @classmethod
     def load(cls, index_path):
-        config = ColBERTConfig.load_from_index(index_path)
+        index_config = ColBERTConfig.load_from_index(index_path)
+        config = ColBERTConfig.from_existing(index_config, Run().config)
         centroids_path = os.path.join(index_path, 'centroids.pt')
         avgresidual_path = os.path.join(index_path, 'avg_residual.pt')
         buckets_path = os.path.join(index_path, 'buckets.pt')
