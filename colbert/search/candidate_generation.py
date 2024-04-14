@@ -22,11 +22,11 @@ class CandidateGeneration:
         return cells, scores
 
     def get_cells_precomputed(self, Q, ncells, qid: int):
-        scores = self.codec.centroids @ Q.T
-        cells = (
-            self.precomputed_centroids[qid].flatten().contiguous()
-        )
-        return cells, scores
+        cells = self.precomputed_centroids[qid].contiguous()
+        selected_scores = self.codec.centroids[cells] @ Q.T
+        scores = torch.zeros((self.codec.centroids.shape[0], Q.shape[0]))
+        scores[cells] = selected_scores
+        return cells[:self.precomputed_num_cand], scores
 
     def generate_candidate_eids(self, Q, ncells):
         cells, scores = self.get_cells_func(Q, ncells)
@@ -44,7 +44,7 @@ class CandidateGeneration:
         elapsed_ms = (time.time() - cand_beg) * 1000
         self.tot_time += elapsed_ms
         self.tot_cells += len(cells)
-        self.cells_retrieved.append(cells.tolist())
+        # self.cells_retrieved.append(cells.tolist())
 
         pids, cell_lengths = self.ivf.lookup(cells)
         if self.use_gpu:

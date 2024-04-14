@@ -27,7 +27,11 @@ from torch.utils.cpp_extension import load
 
 class IndexScorer(IndexLoader, CandidateGeneration):
     def __init__(
-        self, index_path, use_gpu=True, precomputed_centroid_path: str = None
+        self,
+        index_path,
+        use_gpu=True,
+        precomputed_centroid_path: str = None,
+        precomputed_num_cand: int = None,
     ):
         super().__init__(index_path=index_path, use_gpu=use_gpu)
         self.tot_time = 0
@@ -38,7 +42,10 @@ class IndexScorer(IndexLoader, CandidateGeneration):
         self.precomputed_centroids = None
         self.get_cells_func = self.get_cells
         if precomputed_centroid_path is not None:
+            if precomputed_num_cand is None or precomputed_num_cand < 1:
+                raise ValueError("invalid 'precomputed_num_cand'")
             self.precomputed_centroids = torch.load(precomputed_centroid_path)
+            self.precomputed_num_cand = precomputed_num_cand
             self.get_cells_func = self.get_cells_precomputed
 
         IndexScorer.try_load_torch_extensions(use_gpu)

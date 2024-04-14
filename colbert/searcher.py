@@ -53,6 +53,7 @@ class Searcher:
             self.index,
             use_gpu=use_gpu,
             precomputed_centroid_path=self.config.precomputed_centroid_path,
+            precomputed_num_cand=self.config.precomputed_num_cand
         )
 
         print_memory_stats()
@@ -115,7 +116,7 @@ class Searcher:
         avg_cent_size = self.ranker.tot_cells / n
         print_message(f"Avg cent elapsed ms: {avg_cent_match}")
         print_message(f"Avg cent retrieved: {avg_cent_size}")
-        if self.config.save_centroids is not None:
+        if self.config.save_centroids:
             centroids_per_query = {}
             for i, qid in enumerate(queries.keys()):
                 centroids_per_query[qid] = self.ranker.cells_retrieved[i]
