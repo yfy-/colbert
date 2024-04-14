@@ -22,6 +22,6 @@ if __name__ == "__main__":
             result_dict[int(qid)].append(int(cid))
 
     torch.save(
-        {qid: torch.IntTensor(cids) for qid, cids in result_dict.items()},
+        {qid: torch.LongTensor(cids) for qid, cids in result_dict.items()},
         args.out_path,
     )
