@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 """Create a collection for centroids."""
 
 import argparse
@@ -19,10 +21,19 @@ def _main():
         type=argparse.FileType("w"),
         default=sys.stdout,
     )
+    parser.add_argument(
+        "--top-k",
+        "-k",
+        type=int,
+        default=0,
+        help="Use only top-k passages for each centroid. 0 is use all.",
+    )
     args = parser.parse_args()
 
     # We won't do anything useful with GPU.
     sample_pids = torch.load(args.sample_pids).to("cpu")
+    if args.topk_k > 0:
+        sample_pids = sample_pids[:, :args.top_k]
 
     unq_pids = torch.unique(sample_pids)
     sp_cursor = 0
