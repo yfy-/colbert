@@ -32,7 +32,7 @@ def _main():
 
     # We won't do anything useful with GPU.
     sample_pids = torch.load(args.sample_pids).to("cpu")
-    if args.topk_k > 0:
+    if args.top_k > 0:
         sample_pids = sample_pids[:, :args.top_k]
 
     unq_pids = torch.unique(sample_pids)
