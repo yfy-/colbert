@@ -53,7 +53,7 @@ class Searcher:
             self.index,
             use_gpu=use_gpu,
             precomputed_centroid_path=self.config.precomputed_centroid_path,
-            precomputed_num_cand=self.config.precomputed_num_cand
+            precomputed_num_cand=self.config.precomputed_num_cand,
         )
 
         print_memory_stats()
@@ -92,6 +92,70 @@ class Searcher:
         Q = self.encode(queries_, full_length_search=full_length_search)
 
         return self._search_all_Q(queries, Q, k, filter_fn=filter_fn)
+
+    def search_all_timed(
+        self,
+        queries: TextQueries,
+        k=10,
+        filter_fn=None,
+        full_length_search=False,
+        num_run=2,
+    ):
+        queries = Queries.cast(queries)
+        queries_ = list(queries.values())
+
+        Q = self.encode(queries_, full_length_search=full_length_search)
+
+        return self._search_all_Q_timed(
+            queries, Q, k, num_run, filter_fn=filter_fn
+        )
+
+    def _search_all_Q_timed(self, queries, Q, k, num_run, filter_fn=None):
+        qids = list(queries.keys())
+        # Warm-up not timed
+        num_q = Q.size(0)
+        print_message("Starting warmup")
+        all_scored_pids = [
+            list(
+                zip(
+                    *self.dense_search(
+                        Q[query_idx : query_idx + 1],
+                        k,
+                        filter_fn=filter_fn,
+                        qid=qids[query_idx],
+                    )
+                )
+            )
+            for query_idx in tqdm(range(num_q))
+        ]
+
+        times = torch.zeros((num_q, num_run))
+        for run in tqdm(range(num_run), desc="Run loop"):
+            for query_idx in tqdm(range(num_q), desc="Query loop"):
+                search_start = time.time()
+                self.dense_search(
+                    Q[query_idx : query_idx + 1],
+                    k,
+                    filter_fn=filter_fn,
+                    qid=qids[query_idx],
+                )
+                times[query_idx][run] = (time.time() - search_start) * 1000
+
+        data = {qid: val for qid, val in zip(queries.keys(), all_scored_pids)}
+        pivot_times = torch.min(times, dim=1).values
+        provenance = Provenance()
+        provenance.source = "Searcher::search_all_timed"
+        provenance.queries = queries.provenance()
+        provenance.config = self.config.export()
+        provenance.k = k
+        provenance.mean_latency = torch.mean(pivot_times).item()
+        provenance.median_latency = torch.median(pivot_times).item()
+        tail_lat = torch.quantile(
+            pivot_times, torch.tensor([0.95, 0.99]), interpolation="nearest"
+        )
+        provenance.p95_latency = tail_lat[0].item()
+        provenance.p99_latency = tail_lat[1].item()
+        return Ranking(data=data, provenance=provenance)
 
     def _search_all_Q(self, queries, Q, k, filter_fn=None):
         qids = list(queries.keys())

@@ -18,13 +18,14 @@ if __name__ == "__main__":
         searcher = Searcher(
             index="msmarco.nbits=2",
             config=ColBERTConfig(
-                save_centroids=True,
+                save_centroids=False,
                 precomputed_centroid_path="splade_distil_dev_small_unq_3.pt",
+                precomputed_num_cand=10
             ),
         )
         queries = Queries(
             path="/home/clownland/Datasets/msmarco/ir-datasets/"
             "queries.dev.small.tsv"
         )
-        ranking = searcher.search_all(queries, k=10)
+        ranking = searcher.search_all_timed(queries, k=10, num_run=3)
         ranking.save("msmarco_dev_small.nbits=2.ranking.tsv")

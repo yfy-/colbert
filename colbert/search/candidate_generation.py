@@ -21,12 +21,18 @@ class CandidateGeneration:
         cells = cells.unique(sorted=False)
         return cells, scores
 
+    # def get_cells_precomputed(self, Q, ncells, qid: int):
+    #     cells = self.precomputed_centroids[qid].contiguous()
+    #     selected_scores = self.codec.centroids[cells] @ Q.T
+    #     scores = torch.zeros((self.codec.centroids.shape[0], Q.shape[0]))
+    #     scores[cells] = selected_scores
+    #     return cells[:self.precomputed_num_cand], scores
+
     def get_cells_precomputed(self, Q, ncells, qid: int):
-        cells = self.precomputed_centroids[qid].contiguous()
-        selected_scores = self.codec.centroids[cells] @ Q.T
-        scores = torch.zeros((self.codec.centroids.shape[0], Q.shape[0]))
-        scores[cells] = selected_scores
-        return cells[:self.precomputed_num_cand], scores
+        return (
+            self.precomputed_centroids[qid].contiguous(),
+            self.codec.centroids @ Q.T,
+        )
 
     def generate_candidate_eids(self, Q, ncells):
         cells, scores = self.get_cells_func(Q, ncells)
