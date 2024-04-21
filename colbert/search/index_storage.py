@@ -78,7 +78,6 @@ class IndexScorer(IndexLoader, CandidateGeneration):
                 ),
             ],
             extra_cflags=["-O3"],
-            build_directory="build-tmp",
             verbose=os.getenv("COLBERT_LOAD_TORCH_EXTENSION_VERBOSE", "False")
             == "True",
         )
