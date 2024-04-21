@@ -175,4 +175,5 @@ class SearchSettings:
     ndocs: int = DefaultVal(None)
     precomputed_centroid_path: str = DefaultVal(None)
     precomputed_num_cand: int = DefaultVal(None)
+    filter_pids_maxscore: bool = DefaultVal(None)
     save_centroids: str = DefaultVal(False)

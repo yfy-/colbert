@@ -12,14 +12,16 @@ class CandidateGeneration:
         self.use_gpu = use_gpu
 
     def get_cells(self, Q, ncells, qid: Optional[int] = None):
-        scores = (self.codec.centroids @ Q.T)
+        scores = self.codec.centroids @ Q.T
         if ncells == 1:
             cells = scores.argmax(dim=0, keepdim=True).permute(1, 0)
         else:
-            cells = scores.topk(ncells, dim=0, sorted=False).indices.permute(1, 0)  # (32, ncells)
+            cells = scores.topk(ncells, dim=0, sorted=False).indices.permute(
+                1, 0
+            )  # (32, ncells)
         cells = cells.flatten().contiguous()  # (32 * ncells,)
         cells = cells.unique(sorted=False)
-        return cells, scores
+        return cells, scores, None
 
     # def get_cells_precomputed(self, Q, ncells, qid: int):
     #     cells = self.precomputed_centroids[qid].contiguous()
@@ -32,12 +34,33 @@ class CandidateGeneration:
         return (
             self.precomputed_centroids[qid].contiguous(),
             self.codec.centroids @ Q.T,
+            None,
         )
+
+    def get_cells_term_ub_scores(self, Q, ncells, qid: Optional[int] = None):
+        scores = self.codec.centroids @ Q.T
+        if ncells == 1:
+            scores_max = scores.max(dim=0, keepdim=True)
+            ub_scores = scores_max.values.flatten()
+            cells = scores_max.indices
+        else:
+            scores_topk = scores.topk(ncells, dim=0)
+            ub_scores = scores_topk.values[0, :].flatten()
+            cells = scores_topk.indices
+
+        cells = cells.flatten().contiguous()
+        cells = cells.unique(sorted=False)
+        ub_scores_sorted = ub_scores.sort(descending=True)
+        scores = scores[:, ub_scores_sorted.indices]
+        ub_scores = ub_scores_sorted.values.contiguous()
+        return cells, scores, ub_scores
 
     def generate_candidate_eids(self, Q, ncells):
         cells, scores = self.get_cells_func(Q, ncells)
 
-        eids, cell_lengths = self.ivf.lookup(cells)  # eids = (packedlen,)  lengths = (32 * ncells,)
+        eids, cell_lengths = self.ivf.lookup(
+            cells
+        )  # eids = (packedlen,)  lengths = (32 * ncells,)
         eids = eids.long()
         if self.use_gpu:
             eids = eids.cuda()
@@ -45,7 +68,7 @@ class CandidateGeneration:
 
     def generate_candidate_pids(self, Q, ncells, qid: Optional[int] = None):
         cand_beg = time.time()
-        cells, scores = self.get_cells_func(Q, ncells, qid=qid)
+        cells, scores, term_ub_scores = self.get_cells_func(Q, ncells, qid=qid)
         # cells, scores = self.get_cells(Q, ncells)
         elapsed_ms = (time.time() - cand_beg) * 1000
         self.tot_time += elapsed_ms
@@ -55,7 +78,7 @@ class CandidateGeneration:
         pids, cell_lengths = self.ivf.lookup(cells)
         if self.use_gpu:
             pids = pids.cuda()
-        return pids, scores
+        return pids, scores, term_ub_scores
 
     def generate_candidate_scores(self, Q, eids):
         E = self.lookup_eids(eids)
@@ -73,7 +96,9 @@ class CandidateGeneration:
             Q = Q.cuda().half()
         assert Q.dim() == 2
 
-        pids, centroid_scores = self.generate_candidate_pids(Q, ncells, qid=qid)
+        pids, centroid_scores, term_ub_scores = (
+            self.generate_candidate_pids(Q, ncells, qid=qid)
+        )
 
         sorter = pids.sort()
         pids = sorter.values
@@ -82,4 +107,4 @@ class CandidateGeneration:
         if self.use_gpu:
             pids, pids_counts = pids.cuda(), pids_counts.cuda()
 
-        return pids, centroid_scores
+        return pids, centroid_scores, term_ub_scores

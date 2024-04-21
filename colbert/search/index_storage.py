@@ -26,12 +26,15 @@ from torch.utils.cpp_extension import load
 
 
 class IndexScorer(IndexLoader, CandidateGeneration):
+    filter_pids_file = "filter_pids.cpp"
+
     def __init__(
         self,
         index_path,
         use_gpu=True,
         precomputed_centroid_path: str = None,
         precomputed_num_cand: int = None,
+        filter_pids_maxscore: bool = False,
     ):
         super().__init__(index_path=index_path, use_gpu=use_gpu)
         self.tot_time = 0
@@ -41,7 +44,11 @@ class IndexScorer(IndexLoader, CandidateGeneration):
         # search params
         self.precomputed_centroids = None
         self.get_cells_func = self.get_cells
-        if precomputed_centroid_path is not None:
+        self.filter_pids_maxscore = filter_pids_maxscore
+        if filter_pids_maxscore:
+            self.get_cells_func = self.get_cells_term_ub_scores
+            self.__class__.filter_pids_file = "filter_pids_maxscore.cpp"
+        elif precomputed_centroid_path is not None:
             if precomputed_num_cand is None or precomputed_num_cand < 1:
                 raise ValueError("invalid 'precomputed_num_cand'")
             self.precomputed_centroids = torch.load(precomputed_centroid_path)
@@ -66,10 +73,12 @@ class IndexScorer(IndexLoader, CandidateGeneration):
             name="filter_pids_cpp",
             sources=[
                 os.path.join(
-                    pathlib.Path(__file__).parent.resolve(), "filter_pids.cpp"
+                    pathlib.Path(__file__).parent.resolve(),
+                    cls.filter_pids_file,
                 ),
             ],
             extra_cflags=["-O3"],
+            build_directory="build-tmp",
             verbose=os.getenv("COLBERT_LOAD_TORCH_EXTENSION_VERBOSE", "False")
             == "True",
         )
@@ -108,11 +117,11 @@ class IndexScorer(IndexLoader, CandidateGeneration):
         Q = Q[
             :, : config.query_maxlen
         ]  # NOTE: Candidate generation uses only the query tokens
-        embedding_ids, centroid_scores = self.generate_candidates(
-            config, Q, qid=qid
+        embedding_ids, centroid_scores, term_ub_scores = (
+            self.generate_candidates(config, Q, qid=qid)
         )
 
-        return embedding_ids, centroid_scores
+        return embedding_ids, centroid_scores, term_ub_scores
 
     def embedding_ids_to_pids(self, embedding_ids):
         all_pids = torch.unique(
@@ -122,14 +131,18 @@ class IndexScorer(IndexLoader, CandidateGeneration):
 
     def rank(self, config, Q, filter_fn=None, qid: Optional[int] = None):
         with torch.inference_mode():
-            pids, centroid_scores = self.retrieve(config, Q, qid=qid)
+            pids, centroid_scores, term_ub_scores = self.retrieve(
+                config, Q, qid=qid
+            )
 
             if filter_fn is not None:
                 pids = filter_fn(pids)
                 if len(pids) == 0:
                     return [], []
 
-            scores, pids = self.score_pids(config, Q, pids, centroid_scores)
+            scores, pids = self.score_pids(
+                config, Q, pids, centroid_scores, term_ub_scores
+            )
 
             scores_sorter = scores.sort(descending=True)
             pids, scores = (
@@ -139,7 +152,7 @@ class IndexScorer(IndexLoader, CandidateGeneration):
 
             return pids, scores
 
-    def score_pids(self, config, Q, pids, centroid_scores):
+    def score_pids(self, config, Q, pids, centroid_scores, term_ub_scores):
         """
         Always supply a flat list or tensor for `pids`.
 
@@ -218,7 +231,7 @@ class IndexScorer(IndexLoader, CandidateGeneration):
                     torch.topk(approx_scores, k=(config.ndocs // 4)).indices
                 ]
         else:
-            pids = IndexScorer.filter_pids(
+            filter_pids_args = [
                 pids,
                 centroid_scores,
                 self.embeddings.codes,
@@ -226,7 +239,11 @@ class IndexScorer(IndexLoader, CandidateGeneration):
                 self.embeddings_strided.codes_strided.offsets,
                 idx,
                 config.ndocs,
-            )
+            ]
+            if self.filter_pids_maxscore:
+                filter_pids_args.append(term_ub_scores)
+
+            pids = IndexScorer.filter_pids(*filter_pids_args)
 
         # Rank final list of docs using full approximate embeddings (including residuals)
         if self.use_gpu:
