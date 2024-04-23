@@ -113,34 +113,21 @@ class Searcher:
 
     def _search_all_Q_timed(self, queries, Q, k, num_run, filter_fn=None):
         qids = list(queries.keys())
-        # Warm-up not timed
         num_q = Q.size(0)
-        print_message("Starting warmup")
-        all_scored_pids = [
-            list(
-                zip(
-                    *self.dense_search(
-                        Q[query_idx : query_idx + 1],
-                        k,
-                        filter_fn=filter_fn,
-                        qid=qids[query_idx],
-                    )
-                )
-            )
-            for query_idx in tqdm(range(num_q))
-        ]
-
         times = torch.zeros((num_q, num_run))
+        all_scored_pids = []
         for run in tqdm(range(num_run), desc="Run loop"):
             for query_idx in tqdm(range(num_q), desc="Query loop"):
                 search_start = time.time()
-                self.dense_search(
+                pids, ranks, scores = self.dense_search(
                     Q[query_idx : query_idx + 1],
                     k,
                     filter_fn=filter_fn,
                     qid=qids[query_idx],
                 )
                 times[query_idx][run] = (time.time() - search_start) * 1000
+                if run == 0:
+                    all_scored_pids.append(list(zip(pids, ranks, scores)))
 
         data = {qid: val for qid, val in zip(queries.keys(), all_scored_pids)}
         pivot_times = torch.min(times, dim=1).values
