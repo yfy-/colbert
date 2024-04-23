@@ -7,6 +7,8 @@
 #include <utility>
 
 using score_pid = std::pair<float, int>;
+using topk_heap = std::priority_queue<score_pid, std::vector<score_pid>,
+                                      std::greater<score_pid>>;
 
 typedef struct maxsim_args {
   int tid;
@@ -25,13 +27,10 @@ typedef struct maxsim_args {
   bool *idx;
   float *term_ub_scores;
   float max_att_score;
-  std::priority_queue<score_pid, std::vector<score_pid>,
-                      std::greater<score_pid>> *shared_heap;
-  float* theta;
-  pthread_mutex_t* lock;
+  topk_heap local_heap;
 } maxsim_args_t;
 
-void* maxsim(void *args) {
+void *maxsim(void *args) {
   maxsim_args_t *maxsim_args = (maxsim_args_t *)args;
 
   int ndocs_per_thread =
@@ -39,20 +38,15 @@ void* maxsim(void *args) {
   int start = maxsim_args->tid * ndocs_per_thread;
   int end =
       std::min((maxsim_args->tid + 1) * ndocs_per_thread, maxsim_args->npids);
-  auto shared_heap = maxsim_args->shared_heap;
 
+  float theta = -9999;
   for (int i = start; i < end; ++i) {
     int pid = maxsim_args->pids[i];
     float pid_score = 0.0;
     float pid_max_att_score = maxsim_args->max_att_score;
     for (int j = 0; j < maxsim_args->nquery_vectors; ++j) {
-      pthread_mutex_lock(maxsim_args->lock);
-      if (pid_score + pid_max_att_score <= *maxsim_args->theta) {
-        pthread_mutex_unlock(maxsim_args->lock);
+      if (pid_score + pid_max_att_score <= theta)
         break;
-      }
-
-      pthread_mutex_unlock(maxsim_args->lock);
 
       float emb_score = -9999;
       for (int k = 0; k < maxsim_args->doclens[pid]; ++k) {
@@ -67,18 +61,15 @@ void* maxsim(void *args) {
       pid_max_att_score -= maxsim_args->term_ub_scores[j];
     }
 
-    pthread_mutex_lock(maxsim_args->lock);
-    if (shared_heap->size() < maxsim_args->nfiltered_docs) {
-      shared_heap->emplace(pid_score, pid);
-    } else if (pid_score > *maxsim_args->theta) {
-      shared_heap->pop();
-      maxsim_args->shared_heap->emplace(pid_score, pid);
+    if (maxsim_args->local_heap.size() < maxsim_args->nfiltered_docs) {
+      maxsim_args->local_heap.emplace(pid_score, pid);
+    } else if (pid_score > theta) {
+      maxsim_args->local_heap.pop();
+      maxsim_args->local_heap.emplace(pid_score, pid);
     }
 
-    if (maxsim_args->shared_heap->size() == maxsim_args->nfiltered_docs)
-      *maxsim_args->theta = shared_heap->top().first;
-
-    pthread_mutex_unlock(maxsim_args->lock);
+    if (maxsim_args->local_heap.size() == maxsim_args->nfiltered_docs)
+      theta = maxsim_args->local_heap.top().first;
   }
 
   return nullptr;
@@ -93,15 +84,8 @@ void filter_pids_helper(int ncentroids, int nquery_vectors, int npids,
 
   pthread_t threads[nthreads];
   maxsim_args_t args[nthreads];
-  std::priority_queue<score_pid, std::vector<score_pid>,
-                      std::greater<score_pid>>
-      shared_heap;
-  float theta = -9999;
-  pthread_mutex_t lock;
-  if (pthread_mutex_init(&lock, NULL) == -1) {
-    std::cerr << "cannot init mutex\n";
-    std::exit(1);
-  }
+  int thread_nfiltered_docs =
+      std::ceil(static_cast<double>(nfiltered_docs) / nthreads);
 
   for (int i = 0; i < nthreads; i++) {
     args[i].tid = i;
@@ -110,7 +94,7 @@ void filter_pids_helper(int ncentroids, int nquery_vectors, int npids,
     args[i].ncentroids = ncentroids;
     args[i].nquery_vectors = nquery_vectors;
     args[i].npids = npids;
-    args[i].nfiltered_docs = nfiltered_docs;
+    args[i].nfiltered_docs = thread_nfiltered_docs;
 
     args[i].pids = pids;
     args[i].centroid_scores = centroid_scores;
@@ -120,9 +104,6 @@ void filter_pids_helper(int ncentroids, int nquery_vectors, int npids,
     args[i].idx = idx;
     args[i].term_ub_scores = term_ub_scores;
     args[i].max_att_score = max_att_score;
-    args[i].shared_heap = &shared_heap;
-    args[i].theta = &theta;
-    args[i].lock = &lock;
 
     int rc = pthread_create(&threads[i], NULL, maxsim, (void *)&args[i]);
     if (rc) {
@@ -135,10 +116,27 @@ void filter_pids_helper(int ncentroids, int nquery_vectors, int npids,
     pthread_join(threads[i], NULL);
   }
 
-  int num_ret = shared_heap.size();
+  float theta = args[0].local_heap.top().first;
+  for (int i = 1; i < nthreads; ++i) {
+    while (!args[i].local_heap.empty()) {
+      const score_pid& top = args[i].local_heap.top();
+      if (args[0].local_heap.size() < nfiltered_docs) {
+        args[0].local_heap.push(top);
+      } else if (top.first > theta) {
+        args[0].local_heap.pop();
+        args[0].local_heap.push(top);
+      }
+
+      args[i].local_heap.pop();
+      if (args[0].local_heap.size() == nfiltered_docs)
+        theta = args[0].local_heap.top().first;
+    }
+  }
+
+  int num_ret = args[0].local_heap.size();
   for (int i = num_ret - 1; i > -1; --i) {
-    filtered_pids[i] = shared_heap.top().second;
-    shared_heap.pop();
+    filtered_pids[i] = args[0].local_heap.top().second;
+    args[0].local_heap.pop();
   }
 }
 
