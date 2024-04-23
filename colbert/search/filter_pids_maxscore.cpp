@@ -77,7 +77,7 @@ void *maxsim(void *args) {
 
 void filter_pids_helper(int ncentroids, int nquery_vectors, int npids,
                         int *pids, float *centroid_scores, int *codes,
-                        int64_t *doclens, int64_t *offsets, bool *idx,
+                        int64_t *doclens, int64_t *offsets,
                         float *term_ub_scores, float max_att_score,
                         int nfiltered_docs, int *filtered_pids) {
   auto nthreads = at::get_num_threads();
@@ -101,7 +101,6 @@ void filter_pids_helper(int ncentroids, int nquery_vectors, int npids,
     args[i].codes = codes;
     args[i].doclens = doclens;
     args[i].offsets = offsets;
-    args[i].idx = idx;
     args[i].term_ub_scores = term_ub_scores;
     args[i].max_att_score = max_att_score;
 
@@ -119,7 +118,7 @@ void filter_pids_helper(int ncentroids, int nquery_vectors, int npids,
   float theta = args[0].local_heap.top().first;
   for (int i = 1; i < nthreads; ++i) {
     while (!args[i].local_heap.empty()) {
-      const score_pid& top = args[i].local_heap.top();
+      const score_pid &top = args[i].local_heap.top();
       if (args[0].local_heap.size() < nfiltered_docs) {
         args[0].local_heap.push(top);
       } else if (top.first > theta) {
@@ -140,11 +139,12 @@ void filter_pids_helper(int ncentroids, int nquery_vectors, int npids,
   }
 }
 
-torch::Tensor
-filter_pids(const torch::Tensor pids, const torch::Tensor centroid_scores,
-            const torch::Tensor codes, const torch::Tensor doclens,
-            const torch::Tensor offsets, const torch::Tensor idx,
-            int nfiltered_docs, const torch::Tensor term_ub_scores) {
+torch::Tensor filter_pids(const torch::Tensor pids,
+                          const torch::Tensor centroid_scores,
+                          const torch::Tensor codes,
+                          const torch::Tensor doclens,
+                          const torch::Tensor offsets, int nfiltered_docs,
+                          const torch::Tensor term_ub_scores) {
   auto ncentroids = centroid_scores.size(0);
   auto nquery_vectors = centroid_scores.size(1);
   auto npids = pids.size(0);
@@ -154,7 +154,6 @@ filter_pids(const torch::Tensor pids, const torch::Tensor centroid_scores,
   auto codes_a = codes.data_ptr<int>();
   auto doclens_a = doclens.data_ptr<int64_t>();
   auto offsets_a = offsets.data_ptr<int64_t>();
-  auto idx_a = idx.data_ptr<bool>();
   auto term_ub_scores_a = term_ub_scores.data_ptr<float>();
 
   int nfinal_filtered_docs =
@@ -162,7 +161,7 @@ filter_pids(const torch::Tensor pids, const torch::Tensor centroid_scores,
   int final_filtered_pids[nfinal_filtered_docs];
   float max_att_score = term_ub_scores.sum(0).item<float>();
   filter_pids_helper(ncentroids, nquery_vectors, npids, pids_a,
-                     centroid_scores_a, codes_a, doclens_a, offsets_a, idx_a,
+                     centroid_scores_a, codes_a, doclens_a, offsets_a,
                      term_ub_scores_a, max_att_score, nfinal_filtered_docs,
                      final_filtered_pids);
 

@@ -166,7 +166,13 @@ class IndexScorer(IndexLoader, CandidateGeneration):
         if self.use_gpu:
             centroid_scores = centroid_scores.cuda()
 
-        idx = centroid_scores.max(-1).values >= config.centroid_score_threshold
+        if self.use_gpu or not self.filter_pids_maxscore:
+            idx = (
+                centroid_scores.max(-1).values
+                >= config.centroid_score_threshold
+            )
+        else:
+            idx = None
 
         if self.use_gpu:
             approx_scores = []
@@ -240,6 +246,8 @@ class IndexScorer(IndexLoader, CandidateGeneration):
                 config.ndocs,
             ]
             if self.filter_pids_maxscore:
+                # Remove idx parameter
+                del filter_pids_args[5]
                 filter_pids_args.append(term_ub_scores)
 
             pids = IndexScorer.filter_pids(*filter_pids_args)
