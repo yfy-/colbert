@@ -25,10 +25,27 @@ typedef struct maxsim_args {
   int64_t *doclens;
   int64_t *offsets;
   bool *idx;
-  float *term_ub_scores;
-  float max_att_score;
-  topk_heap local_heap;
+  std::vector<float> *cum_max_att_score;
+  std::vector<score_pid> local_heap;
 } maxsim_args_t;
+
+void sink_heap(std::vector<score_pid> &heap, std::size_t idx) {
+  std::size_t min_idx = idx;
+  std::size_t heap_size = heap.size();
+  do {
+    std::size_t l_idx = idx * 2 + 1;
+    std::size_t r_idx = l_idx + 1;
+
+    if (l_idx < heap_size && heap[l_idx] < heap[min_idx])
+      min_idx = l_idx;
+
+    if (r_idx < heap_size && heap[r_idx] < heap[min_idx])
+      min_idx = r_idx;
+
+    std::swap(heap[idx], heap[min_idx]);
+    idx = min_idx;
+  } while (min_idx != idx);
+}
 
 void *maxsim(void *args) {
   maxsim_args_t *maxsim_args = (maxsim_args_t *)args;
@@ -40,12 +57,12 @@ void *maxsim(void *args) {
       std::min((maxsim_args->tid + 1) * ndocs_per_thread, maxsim_args->npids);
 
   float theta = -9999;
+  auto comp = std::greater<score_pid>();
   for (int i = start; i < end; ++i) {
     int pid = maxsim_args->pids[i];
     float pid_score = 0.0;
-    float pid_max_att_score = maxsim_args->max_att_score;
     for (int j = 0; j < maxsim_args->nquery_vectors; ++j) {
-      if (pid_score + pid_max_att_score <= theta)
+      if (pid_score + (*maxsim_args->cum_max_att_score)[j] <= theta)
         break;
 
       float emb_score = -9999;
@@ -58,18 +75,19 @@ void *maxsim(void *args) {
       }
 
       pid_score += emb_score;
-      pid_max_att_score -= maxsim_args->term_ub_scores[j];
     }
 
     if (maxsim_args->local_heap.size() < maxsim_args->nfiltered_docs) {
-      maxsim_args->local_heap.emplace(pid_score, pid);
+      maxsim_args->local_heap.emplace_back(pid_score, pid);
+      std::push_heap(std::begin(maxsim_args->local_heap),
+                     std::end(maxsim_args->local_heap), comp);
     } else if (pid_score > theta) {
-      maxsim_args->local_heap.pop();
-      maxsim_args->local_heap.emplace(pid_score, pid);
+      maxsim_args->local_heap[0] = std::make_pair(pid_score, pid);
+      sink_heap(maxsim_args->local_heap, 0);
     }
 
     if (maxsim_args->local_heap.size() == maxsim_args->nfiltered_docs)
-      theta = maxsim_args->local_heap.top().first;
+      theta = maxsim_args->local_heap[0].first;
   }
 
   return nullptr;
@@ -78,7 +96,7 @@ void *maxsim(void *args) {
 void filter_pids_helper(int ncentroids, int nquery_vectors, int npids,
                         int *pids, float *centroid_scores, int *codes,
                         int64_t *doclens, int64_t *offsets,
-                        float *term_ub_scores, float max_att_score,
+                        std::vector<float> &cum_max_att_score,
                         int nfiltered_docs, int *filtered_pids) {
   auto nthreads = at::get_num_threads();
 
@@ -101,8 +119,7 @@ void filter_pids_helper(int ncentroids, int nquery_vectors, int npids,
     args[i].codes = codes;
     args[i].doclens = doclens;
     args[i].offsets = offsets;
-    args[i].term_ub_scores = term_ub_scores;
-    args[i].max_att_score = max_att_score;
+    args[i].cum_max_att_score = &cum_max_att_score;
 
     int rc = pthread_create(&threads[i], NULL, maxsim, (void *)&args[i]);
     if (rc) {
@@ -115,27 +132,34 @@ void filter_pids_helper(int ncentroids, int nquery_vectors, int npids,
     pthread_join(threads[i], NULL);
   }
 
-  float theta = args[0].local_heap.top().first;
+  auto comp = std::greater<score_pid>();
+  float theta = args[0].local_heap[0].first;
   for (int i = 1; i < nthreads; ++i) {
     while (!args[i].local_heap.empty()) {
-      const score_pid &top = args[i].local_heap.top();
+      const score_pid &top = args[i].local_heap[0];
       if (args[0].local_heap.size() < nfiltered_docs) {
-        args[0].local_heap.push(top);
+        args[0].local_heap.push_back(args[i].local_heap[0]);
+        std::push_heap(std::begin(args[0].local_heap),
+                       std::end(args[0].local_heap), comp);
       } else if (top.first > theta) {
-        args[0].local_heap.pop();
-        args[0].local_heap.push(top);
+        args[0].local_heap[0] = args[i].local_heap[0];
+        sink_heap(args[0].local_heap, 0);
       }
 
-      args[i].local_heap.pop();
+      std::pop_heap(std::begin(args[i].local_heap),
+                    std::end(args[i].local_heap), comp);
+      args[i].local_heap.pop_back();
       if (args[0].local_heap.size() == nfiltered_docs)
-        theta = args[0].local_heap.top().first;
+        theta = args[0].local_heap[0].first;
     }
   }
 
   int num_ret = args[0].local_heap.size();
   for (int i = num_ret - 1; i > -1; --i) {
-    filtered_pids[i] = args[0].local_heap.top().second;
-    args[0].local_heap.pop();
+    filtered_pids[i] = args[0].local_heap[0].second;
+    std::pop_heap(std::begin(args[0].local_heap), std::end(args[0].local_heap),
+                  comp);
+    args[0].local_heap.pop_back();
   }
 }
 
@@ -160,9 +184,15 @@ torch::Tensor filter_pids(const torch::Tensor pids,
       std::min(nfiltered_docs / 4, static_cast<int>(npids));
   int final_filtered_pids[nfinal_filtered_docs];
   float max_att_score = term_ub_scores.sum(0).item<float>();
+  std::vector<float> cum_max_att_score(nquery_vectors);
+  cum_max_att_score[0] = max_att_score;
+  for (int i = 1; i < nquery_vectors; ++i) {
+    cum_max_att_score[i] = cum_max_att_score[i - 1] - term_ub_scores_a[i - 1];
+  }
+
   filter_pids_helper(ncentroids, nquery_vectors, npids, pids_a,
                      centroid_scores_a, codes_a, doclens_a, offsets_a,
-                     term_ub_scores_a, max_att_score, nfinal_filtered_docs,
+                     cum_max_att_score, nfinal_filtered_docs,
                      final_filtered_pids);
 
   // bool ones[ncentroids];
