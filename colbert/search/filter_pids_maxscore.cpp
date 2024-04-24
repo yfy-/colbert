@@ -30,10 +30,9 @@ typedef struct maxsim_args {
 } maxsim_args_t;
 
 void sink_heap(std::vector<score_pid> &heap, std::size_t idx) {
-  std::size_t min_idx = idx;
   std::size_t heap_size = heap.size();
 
-  do {
+  while (true) {
     std::size_t min_idx = idx;
     std::size_t l_idx = idx * 2 + 1;
     std::size_t r_idx = l_idx + 1;
@@ -44,9 +43,12 @@ void sink_heap(std::vector<score_pid> &heap, std::size_t idx) {
     if (r_idx < heap_size && heap[r_idx] < heap[min_idx])
       min_idx = r_idx;
 
+    if (min_idx == idx)
+      break;
+
     std::swap(heap[idx], heap[min_idx]);
     idx = min_idx;
-  } while (min_idx != idx);
+  }
 }
 
 void *maxsim(void *args) {
