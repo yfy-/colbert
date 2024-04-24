@@ -32,7 +32,9 @@ typedef struct maxsim_args {
 void sink_heap(std::vector<score_pid> &heap, std::size_t idx) {
   std::size_t min_idx = idx;
   std::size_t heap_size = heap.size();
+
   do {
+    std::size_t min_idx = idx;
     std::size_t l_idx = idx * 2 + 1;
     std::size_t r_idx = l_idx + 1;
 
