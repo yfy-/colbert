@@ -176,4 +176,5 @@ class SearchSettings:
     precomputed_centroid_path: str = DefaultVal(None)
     precomputed_num_cand: int = DefaultVal(None)
     filter_pids_maxscore: bool = DefaultVal(None)
+    maxscore_quantile: float = DefaultVal(1.0)
     save_centroids: str = DefaultVal(False)

@@ -40,16 +40,14 @@ class CandidateGeneration:
     def get_cells_term_ub_scores(self, Q, ncells, qid: Optional[int] = None):
         scores = self.codec.centroids @ Q.T
         if ncells == 1:
-            scores_max = scores.max(dim=0, keepdim=True)
-            ub_scores = scores_max.values.flatten()
-            cells = scores_max.indices
+            scores_topk = scores.max(dim=0, keepdim=True)
         else:
             scores_topk = scores.topk(ncells, dim=0)
-            ub_scores = scores_topk.values[0, :].flatten()
-            cells = scores_topk.indices
 
-        cells = cells.flatten().contiguous()
-        cells = cells.unique(sorted=False)
+        cells = scores_topk.indices.flatten().contiguous().unique(sorted=False)
+        ub_scores = scores.quantile(
+            self.maxscore_quantile, dim=0, interpolation="nearest"
+        )
         ub_scores_sorted = ub_scores.sort(descending=True)
         scores = scores[:, ub_scores_sorted.indices]
         ub_scores = ub_scores_sorted.values.contiguous()

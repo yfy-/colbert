@@ -35,6 +35,7 @@ class IndexScorer(IndexLoader, CandidateGeneration):
         precomputed_centroid_path: str = None,
         precomputed_num_cand: int = None,
         filter_pids_maxscore: bool = False,
+        maxscore_quantile: float = None
     ):
         super().__init__(index_path=index_path, use_gpu=use_gpu)
         self.tot_time = 0
@@ -45,6 +46,7 @@ class IndexScorer(IndexLoader, CandidateGeneration):
         self.precomputed_centroids = None
         self.get_cells_func = self.get_cells
         self.filter_pids_maxscore = filter_pids_maxscore
+        self.maxscore_quantile = maxscore_quantile
         if filter_pids_maxscore:
             self.get_cells_func = self.get_cells_term_ub_scores
             self.__class__.filter_pids_file = "filter_pids_maxscore.cpp"

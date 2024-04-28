@@ -54,7 +54,8 @@ class Searcher:
             use_gpu=use_gpu,
             precomputed_centroid_path=self.config.precomputed_centroid_path,
             precomputed_num_cand=self.config.precomputed_num_cand,
-            filter_pids_maxscore=self.config.filter_pids_maxscore
+            filter_pids_maxscore=self.config.filter_pids_maxscore,
+            maxscore_quantile=self.config.maxscore_quantile
         )
 
         print_memory_stats()
