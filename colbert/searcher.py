@@ -55,7 +55,7 @@ class Searcher:
             precomputed_centroid_path=self.config.precomputed_centroid_path,
             precomputed_num_cand=self.config.precomputed_num_cand,
             filter_pids_maxscore=self.config.filter_pids_maxscore,
-            maxscore_quantile=self.config.maxscore_quantile
+            maxscore_quantile=self.config.maxscore_quantile,
         )
 
         print_memory_stats()
@@ -146,6 +146,32 @@ class Searcher:
         provenance.p99_latency = tail_lat[1].item()
         return Ranking(data=data, provenance=provenance)
 
+    def search_centroid_triplet(
+        self, queries: TextQueries, nprobe_top=1, nprobe_bottom=1
+    ):
+        """Search for top and bottom centroids for query."""
+        queries = Queries.cast(queries)
+        queries_ = list(queries.values())
+
+        Q = self.encode(queries_)
+        qids = list(queries.keys())
+        triplets = None
+        for query_idx in tqdm(range(Q.size(0))):
+            pairs = self.ranker.centroid_pair_rank(
+                self.config,
+                Q[query_idx : query_idx + 1],
+                nprobe_top,
+                nprobe_bottom,
+            ).cpu()
+            qid = torch.full((pairs.shape[0], 1), qids[query_idx])
+            triplet = torch.cat((qid, pairs), dim=1)
+            if triplets is None:
+                triplets = triplet
+            else:
+                triplets = torch.cat((triplets, triplet), dim=0)
+
+        return triplets
+
     def _search_all_Q(self, queries, Q, k, filter_fn=None):
         qids = list(queries.keys())
         search_start = time.time()
@@ -159,6 +185,7 @@ class Searcher:
                         qid=qids[query_idx],
                     )
                 )
+
             )
             for query_idx in tqdm(range(Q.size(0)))
         ]

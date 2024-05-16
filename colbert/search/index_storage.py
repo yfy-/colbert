@@ -153,6 +153,14 @@ class IndexScorer(IndexLoader, CandidateGeneration):
 
             return pids, scores
 
+    def centroid_pair_rank(self, config, Q, nprobe_top, nprobe_bottom):
+        """Rank top and bottom centroid candidates for each term."""
+        with torch.inference_mode():
+            Q = Q[:, : config.query_maxlen]
+            return self.generate_candidates_pairs(
+                Q, nprobe_top, nprobe_bottom
+            )
+
     def score_pids(self, config, Q, pids, centroid_scores, term_ub_scores):
         """
         Always supply a flat list or tensor for `pids`.

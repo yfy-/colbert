@@ -94,8 +94,8 @@ class CandidateGeneration:
             Q = Q.cuda().half()
         assert Q.dim() == 2
 
-        pids, centroid_scores, term_ub_scores = (
-            self.generate_candidate_pids(Q, ncells, qid=qid)
+        pids, centroid_scores, term_ub_scores = self.generate_candidate_pids(
+            Q, ncells, qid=qid
         )
 
         sorter = pids.sort()
@@ -106,3 +106,35 @@ class CandidateGeneration:
             pids, pids_counts = pids.cuda(), pids_counts.cuda()
 
         return pids, centroid_scores, term_ub_scores
+
+    def generate_candidates_pairs(
+        self, Q, nprobe_top, nprobe_bottom
+    ) -> torch.IntTensor:
+        Q = Q.squeeze(0)
+        if self.use_gpu:
+            Q = Q.cuda().half()
+        assert Q.dim() == 2
+
+        scores = self.codec.centroids @ Q.T
+        if nprobe_top == 1:
+            top_cells = scores.argmax(dim=0, keepdim=True)
+        else:
+            top_cells = scores.topk(nprobe_top, dim=0, sorted=False).indices
+
+        if nprobe_bottom == 1:
+            bottom_cells = scores.argmin(dim=0, keepdim=True)
+        else:
+            bottom_cells = scores.topk(
+                nprobe_bottom, dim=0, sorted=False, largest=False
+            ).indices
+
+        top_cells = top_cells.flatten().unique(sorted=False)
+        bottom_cells = bottom_cells.flatten().unique(sorted=False)
+        top_bottom_scores = (
+            self.codec.centroids[top_cells]
+            @ self.codec.centroids[bottom_cells].T
+        )
+        bottom_cells = bottom_cells[top_bottom_scores.argmin(dim=1)]
+        return torch.cat(
+            (top_cells.unsqueeze(dim=1), bottom_cells.unsqueeze(dim=1)), dim=1
+        )
