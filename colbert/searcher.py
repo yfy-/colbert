@@ -155,7 +155,7 @@ class Searcher:
 
         Q = self.encode(queries_)
         qids = list(queries.keys())
-        triplets = None
+        triplets = []
         for query_idx in tqdm(range(Q.size(0))):
             pairs = self.ranker.centroid_pair_rank(
                 self.config,
@@ -164,13 +164,9 @@ class Searcher:
                 nprobe_bottom,
             ).cpu()
             qid = torch.full((pairs.shape[0], 1), qids[query_idx])
-            triplet = torch.cat((qid, pairs), dim=1)
-            if triplets is None:
-                triplets = triplet
-            else:
-                triplets = torch.cat((triplets, triplet), dim=0)
+            triplets.append(torch.cat((qid, pairs), dim=1))
 
-        return triplets
+        return torch.concat(triplets, dim=0)
 
     def _search_all_Q(self, queries, Q, k, filter_fn=None):
         qids = list(queries.keys())
