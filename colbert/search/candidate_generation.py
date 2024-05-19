@@ -110,6 +110,8 @@ class CandidateGeneration:
     def generate_candidates_pairs(
         self, Q, nprobe_top, nprobe_bottom
     ) -> torch.IntTensor:
+        assert nprobe_top > 0
+
         Q = Q.squeeze(0)
         if self.use_gpu:
             Q = Q.cuda().half()
@@ -121,7 +123,9 @@ class CandidateGeneration:
         else:
             top_cells = scores.topk(nprobe_top, dim=0, sorted=False).indices
 
-        if nprobe_bottom == 1:
+        if nprobe_bottom <= 0:
+            bottom_cells = None
+        elif nprobe_bottom == 1:
             bottom_cells = scores.argmin(dim=0, keepdim=True)
         else:
             bottom_cells = scores.topk(
@@ -129,6 +133,13 @@ class CandidateGeneration:
             ).indices
 
         top_cells = top_cells.flatten().unique(sorted=False)
+        if bottom_cells is None:
+            top_cells = top_cells.unsqueeze(dim=1)
+            return torch.cat(
+                (top_cells, torch.full_like(top_cells, -1, dtype=torch.int32)),
+                dim=1,
+            )
+
         bottom_cells = bottom_cells.flatten().unique(sorted=False)
         top_bottom_scores = (
             self.codec.centroids[top_cells]
