@@ -30,7 +30,7 @@ if __name__ == "__main__":
     k = args.num_passage
     device = args.device
     with Run().context(RunConfig(nranks=1)):
-                config = ColBERTConfig(experiment="msmarco")
+        config = ColBERTConfig(experiment="msmarco")
         index_path = osp.join(
             config.root, config.experiment, "indexes", "msmarco.nbits=2"
         )
