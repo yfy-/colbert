@@ -43,7 +43,9 @@ if __name__ == "__main__":
             loader.codec, loader.embeddings, loader.doclens
         )
         n = len(lengths)
-        cid_pids = torch.full((n, k), -1, dtype=int, device=device)
+        cid_pids = torch.full(
+            (n, torch.max(lengths)), -1, dtype=int, device=device
+        )
         num_missing = 0
         with tqdm(total=n, desc="Find closest passage to centroid") as pbar:
             for i in range(n):
@@ -66,6 +68,9 @@ if __name__ == "__main__":
                     pids_lengths_cumsum, emb_scores.indices, right=True
                 )
                 # cid_pids[i] = pids[max_pids_all]
+
+                # Take all passages for now
+                k = lengths[i].item()
                 while j < k:
                     next_m = m + k - j
                     if next_m >= len(emb_scores.indices):
@@ -99,4 +104,4 @@ if __name__ == "__main__":
             logging.warning(
                 f"{num_missing}/{n} centroids do not have '{k}' passages"
             )
-        torch.save(cid_pids, osp.join(index_path, f"sample_pids_unq_{k}.pt"))
+        torch.save(cid_pids, osp.join(index_path, f"sample_pids_all.pt"))
