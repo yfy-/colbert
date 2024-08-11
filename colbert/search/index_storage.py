@@ -35,7 +35,7 @@ class IndexScorer(IndexLoader, CandidateGeneration):
         precomputed_centroid_path: str = None,
         precomputed_num_cand: int = None,
         filter_pids_maxscore: bool = False,
-        maxscore_quantile: float = None
+        maxscore_quantile: float = None,
     ):
         super().__init__(index_path=index_path, use_gpu=use_gpu)
         self.tot_time = 0
@@ -62,6 +62,11 @@ class IndexScorer(IndexLoader, CandidateGeneration):
         self.embeddings_strided = ResidualEmbeddingsStrided(
             self.codec, self.embeddings, self.doclens
         )
+        self.pre_alloc_scores = torch.zeros(
+            (self.codec.centroids.shape[0], 32)
+        )
+        if use_gpu:
+            self.pre_alloc_scores = self.pre_alloc_scores.to("cuda").half()
 
     @classmethod
     def try_load_torch_extensions(cls, use_gpu):
@@ -157,9 +162,7 @@ class IndexScorer(IndexLoader, CandidateGeneration):
         """Rank top and bottom centroid candidates for each term."""
         with torch.inference_mode():
             Q = Q[:, : config.query_maxlen]
-            return self.generate_candidates_pairs(
-                Q, nprobe_top, nprobe_bottom
-            )
+            return self.generate_candidates_pairs(Q, nprobe_top, nprobe_bottom)
 
     def score_pids(self, config, Q, pids, centroid_scores, term_ub_scores):
         """

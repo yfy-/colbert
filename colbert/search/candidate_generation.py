@@ -23,19 +23,26 @@ class CandidateGeneration:
         cells = cells.unique(sorted=False)
         return cells, scores, None
 
-    # def get_cells_precomputed(self, Q, ncells, qid: int):
-    #     cells = self.precomputed_centroids[qid].contiguous()
-    #     selected_scores = self.codec.centroids[cells] @ Q.T
-    #     scores = torch.zeros((self.codec.centroids.shape[0], Q.shape[0]))
-    #     scores[cells] = selected_scores
-    #     return cells[:self.precomputed_num_cand], scores
-
     def get_cells_precomputed(self, Q, ncells, qid: int):
-        return (
-            self.precomputed_centroids[qid].contiguous(),
-            self.codec.centroids @ Q.T,
-            None,
-        )
+        cells = self.precomputed_centroids[qid].contiguous()
+        if self.use_gpu:
+            cells = cells.to("cuda")
+
+        selected_scores = self.codec.centroids[cells] @ Q.T
+        self.pre_alloc_scores.zero_()
+        self.pre_alloc_scores[cells] = selected_scores
+        rerank_scores = selected_scores[:self.precomputed_num_cand]
+        if ncells == 1:
+            reranked_idxs = rerank_scores.argmax(dim=0, keepdim=True).permute(
+                1, 0
+            )
+        else:
+            reranked_idxs = rerank_scores.topk(
+                ncells, dim=0, sorted=False
+            ).indices.permute(1, 0)
+
+        reranked_idxs = reranked_idxs.flatten().unique(sorted=False)
+        return cells[reranked_idxs], self.pre_alloc_scores, None
 
     def get_cells_term_ub_scores(self, Q, ncells, qid: Optional[int] = None):
         scores = self.codec.centroids @ Q.T
@@ -45,12 +52,19 @@ class CandidateGeneration:
             scores_topk = scores.topk(ncells, dim=0)
 
         cells = scores_topk.indices.flatten().contiguous().unique(sorted=False)
-        ub_scores = scores.quantile(
-            self.maxscore_quantile, dim=0, interpolation="nearest"
-        )
+
+        # Sort cells by their importance
+        cell_importance = torch.sum(scores[cells], dim=1)
+        cells = cells[cell_importance.argsort(descending=True)]
+        # ub_scores =  scores.quantile(
+        #     self.maxscore_quantile, dim=0, interpolation="nearest"
+        # )
+
+        ub_scores = scores_topk.values[0, :]
         ub_scores_sorted = ub_scores.sort(descending=True)
         scores = scores[:, ub_scores_sorted.indices]
         ub_scores = ub_scores_sorted.values.contiguous()
+
         return cells, scores, ub_scores
 
     def generate_candidate_eids(self, Q, ncells):
@@ -98,12 +112,12 @@ class CandidateGeneration:
             Q, ncells, qid=qid
         )
 
-        sorter = pids.sort()
-        pids = sorter.values
+        # sorter = pids.sort()
+        # pids = sorter.values
 
-        pids, pids_counts = torch.unique_consecutive(pids, return_counts=True)
-        if self.use_gpu:
-            pids, pids_counts = pids.cuda(), pids_counts.cuda()
+        # pids, pids_counts = torch.unique_consecutive(pids, return_counts=True)
+        # if self.use_gpu:
+        #     pids, pids_counts = pids.cuda(), pids_counts.cuda()
 
         return pids, centroid_scores, term_ub_scores
 

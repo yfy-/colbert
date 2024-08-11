@@ -44,7 +44,7 @@ if __name__ == "__main__":
         )
         n = len(lengths)
         cid_pids = torch.full(
-            (n, torch.max(lengths)), -1, dtype=int, device=device
+            (n, torch.max(lengths)), -1, dtype=int, device="cpu"
         )
         num_missing = 0
         with tqdm(total=n, desc="Find closest passage to centroid") as pbar:

@@ -184,6 +184,17 @@ torch::Tensor filter_pids(const torch::Tensor pids,
   auto offsets_a = offsets.data_ptr<int64_t>();
   auto term_ub_scores_a = term_ub_scores.data_ptr<float>();
 
+  std::unordered_set<int> unq_pids;
+  std::vector<int> unq_pids_vec;
+  for (int i = 0; i < npids; ++i) {
+    auto found = unq_pids.find(pids_a[i]);
+    if (found == std::end(unq_pids)) {
+      unq_pids_vec.push_back(pids_a[i]);
+      unq_pids.insert(pids_a[i]);
+    }
+  }
+  npids = unq_pids_vec.size();
+
   int nfinal_filtered_docs =
       std::min(nfiltered_docs / 4, static_cast<int>(npids));
   int final_filtered_pids[nfinal_filtered_docs];
@@ -194,9 +205,9 @@ torch::Tensor filter_pids(const torch::Tensor pids,
     cum_max_att_score[i] = cum_max_att_score[i - 1] - term_ub_scores_a[i - 1];
   }
 
-  filter_pids_helper(ncentroids, nquery_vectors, npids, pids_a,
-                     centroid_scores_a, codes_a, doclens_a, offsets_a,
-                     cum_max_att_score, nfinal_filtered_docs,
+  filter_pids_helper(ncentroids, nquery_vectors, npids,
+                     unq_pids_vec.data(), centroid_scores_a, codes_a, doclens_a,
+                     offsets_a, cum_max_att_score, nfinal_filtered_docs,
                      final_filtered_pids);
 
   // bool ones[ncentroids];
