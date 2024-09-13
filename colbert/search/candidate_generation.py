@@ -31,7 +31,7 @@ class CandidateGeneration:
         selected_scores = self.codec.centroids[cells] @ Q.T
         self.pre_alloc_scores.zero_()
         self.pre_alloc_scores[cells] = selected_scores
-        rerank_scores = selected_scores[:self.precomputed_num_cand]
+        rerank_scores = selected_scores[: self.precomputed_num_cand]
         if ncells == 1:
             reranked_idxs = rerank_scores.argmax(dim=0, keepdim=True).permute(
                 1, 0
@@ -112,12 +112,15 @@ class CandidateGeneration:
             Q, ncells, qid=qid
         )
 
-        # sorter = pids.sort()
-        # pids = sorter.values
+        if not self.filter_pids_maxscore:
+            sorter = pids.sort()
+            pids = sorter.values
 
-        # pids, pids_counts = torch.unique_consecutive(pids, return_counts=True)
-        # if self.use_gpu:
-        #     pids, pids_counts = pids.cuda(), pids_counts.cuda()
+            pids, pids_counts = torch.unique_consecutive(
+                pids, return_counts=True
+            )
+            if self.use_gpu:
+                pids, pids_counts = pids.cuda(), pids_counts.cuda()
 
         return pids, centroid_scores, term_ub_scores
 

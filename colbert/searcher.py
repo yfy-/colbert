@@ -130,7 +130,7 @@ class Searcher:
                 if run == 0:
                     all_scored_pids.append(list(zip(pids, ranks, scores)))
 
-        avg_cent_match = self.ranker.tot_time / num_q
+        avg_cent_match = self.ranker.tot_time / num_run / num_q
         print_message(f"Avg cent elapsed ms: {avg_cent_match}")
         data = {qid: val for qid, val in zip(queries.keys(), all_scored_pids)}
         pivot_times = torch.min(times, dim=1).values

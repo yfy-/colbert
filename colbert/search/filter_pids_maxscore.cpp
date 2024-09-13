@@ -53,16 +53,10 @@ void sink_heap(std::vector<score_pid> &heap, std::size_t idx) {
 
 void *maxsim(void *args) {
   maxsim_args_t *maxsim_args = (maxsim_args_t *)args;
-
-  int ndocs_per_thread =
-      (int)std::ceil(((float)maxsim_args->npids) / maxsim_args->nthreads);
-  int start = maxsim_args->tid * ndocs_per_thread;
-  int end =
-      std::min((maxsim_args->tid + 1) * ndocs_per_thread, maxsim_args->npids);
-
   float theta = -9999;
   auto comp = std::greater<score_pid>();
-  for (int i = start; i < end; ++i) {
+  for (int i = maxsim_args->tid; i < maxsim_args->npids;
+       i += maxsim_args->nthreads) {
     int pid = maxsim_args->pids[i];
     float pid_score = 0.0;
     for (int j = 0; j < maxsim_args->nquery_vectors; ++j) {
@@ -205,9 +199,9 @@ torch::Tensor filter_pids(const torch::Tensor pids,
     cum_max_att_score[i] = cum_max_att_score[i - 1] - term_ub_scores_a[i - 1];
   }
 
-  filter_pids_helper(ncentroids, nquery_vectors, npids,
-                     unq_pids_vec.data(), centroid_scores_a, codes_a, doclens_a,
-                     offsets_a, cum_max_att_score, nfinal_filtered_docs,
+  filter_pids_helper(ncentroids, nquery_vectors, npids, unq_pids_vec.data(),
+                     centroid_scores_a, codes_a, doclens_a, offsets_a,
+                     cum_max_att_score, nfinal_filtered_docs,
                      final_filtered_pids);
 
   // bool ones[ncentroids];
