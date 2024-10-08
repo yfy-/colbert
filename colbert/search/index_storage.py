@@ -33,7 +33,8 @@ class IndexScorer(IndexLoader, CandidateGeneration):
         index_path,
         use_gpu=True,
         precomputed_centroid_path: str = None,
-        precomputed_num_cand: int = None,
+        sparcent_k_score: int = None,
+        sparcent_k_rerank: int = None,
         filter_pids_maxscore: bool = False,
         maxscore_quantile: float = None,
     ):
@@ -51,10 +52,20 @@ class IndexScorer(IndexLoader, CandidateGeneration):
             self.get_cells_func = self.get_cells_term_ub_scores
             self.__class__.filter_pids_file = "filter_pids_maxscore.cpp"
         elif precomputed_centroid_path is not None:
-            if precomputed_num_cand is None or precomputed_num_cand < 1:
+            if (
+                sparcent_k_score is None
+                or sparcent_k_rerank is None
+                or sparcent_k_rerank < 1
+                or sparcent_k_score < sparcent_k_rerank
+            ):
                 raise ValueError("invalid 'precomputed_num_cand'")
-            self.precomputed_centroids = torch.load(precomputed_centroid_path)
-            self.precomputed_num_cand = precomputed_num_cand
+
+            prec_cents = torch.load(precomputed_centroid_path)
+            self.precomputed_centroids = {
+                qid: ret_cents[:sparcent_k_score]
+                for qid, ret_cents in prec_cents.items()
+            }
+            self.sparcent_k_rerank = sparcent_k_rerank
             self.get_cells_func = self.get_cells_precomputed
 
         IndexScorer.try_load_torch_extensions(use_gpu)
@@ -62,9 +73,7 @@ class IndexScorer(IndexLoader, CandidateGeneration):
         self.embeddings_strided = ResidualEmbeddingsStrided(
             self.codec, self.embeddings, self.doclens
         )
-        self.pre_alloc_scores = torch.zeros(
-            (self.codec.centroids.shape[0], 32)
-        )
+        self.pre_alloc_scores = torch.zeros((self.codec.centroids.shape[0], 32))
         if use_gpu:
             self.pre_alloc_scores = self.pre_alloc_scores.to("cuda").half()
 

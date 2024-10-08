@@ -53,7 +53,8 @@ class Searcher:
             self.index,
             use_gpu=use_gpu,
             precomputed_centroid_path=self.config.precomputed_centroid_path,
-            precomputed_num_cand=self.config.precomputed_num_cand,
+            sparcent_k_score=self.config.sparcent_k_score,
+            sparcent_k_rerank=self.config.sparcent_k_rerank,
             filter_pids_maxscore=self.config.filter_pids_maxscore,
             maxscore_quantile=self.config.maxscore_quantile,
         )

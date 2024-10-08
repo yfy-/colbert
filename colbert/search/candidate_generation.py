@@ -31,7 +31,7 @@ class CandidateGeneration:
         selected_scores = self.codec.centroids[cells] @ Q.T
         self.pre_alloc_scores.zero_()
         self.pre_alloc_scores[cells] = selected_scores
-        rerank_scores = selected_scores[: self.precomputed_num_cand]
+        rerank_scores = selected_scores[: self.sparcent_k_rerank]
         if ncells == 1:
             reranked_idxs = rerank_scores.argmax(dim=0, keepdim=True).permute(
                 1, 0
