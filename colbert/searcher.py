@@ -103,6 +103,7 @@ class Searcher:
         filter_fn=None,
         full_length_search=False,
         num_run=2,
+        prec_pids: Optional[torch.Tensor] = None,
     ):
         queries = Queries.cast(queries)
         queries_ = list(queries.values())
@@ -110,10 +111,18 @@ class Searcher:
         Q = self.encode(queries_, full_length_search=full_length_search)
 
         return self._search_all_Q_timed(
-            queries, Q, k, num_run, filter_fn=filter_fn
+            queries, Q, k, num_run, filter_fn=filter_fn, prec_pids=prec_pids
         )
 
-    def _search_all_Q_timed(self, queries, Q, k, num_run, filter_fn=None):
+    def _search_all_Q_timed(
+        self,
+        queries,
+        Q,
+        k,
+        num_run,
+        filter_fn=None,
+        prec_pids: Optional[torch.Tensor] = None,
+    ):
         qids = list(queries.keys())
         num_q = Q.size(0)
         times = torch.zeros((num_q, num_run))
@@ -121,12 +130,18 @@ class Searcher:
         for run in tqdm(range(num_run), desc="Run loop"):
             for query_idx in tqdm(range(num_q), desc="Query loop"):
                 search_start = time.time()
-                pids, ranks, scores = self.dense_search(
-                    Q[query_idx : query_idx + 1],
-                    k,
-                    filter_fn=filter_fn,
-                    qid=qids[query_idx],
-                )
+                if prec_pids is not None:
+                    pids, ranks, scores = self.dense_precomputed_search(
+                        Q[query_idx : query_idx + 1], prec_pids[query_idx], k=k
+                    )
+                else:
+                    pids, ranks, scores = self.dense_search(
+                        Q[query_idx : query_idx + 1],
+                        k=k,
+                        filter_fn=filter_fn,
+                        qid=qids[query_idx],
+                    )
+
                 times[query_idx][run] = (time.time() - search_start) * 1000
                 if run == 0:
                     all_scored_pids.append(list(zip(pids, ranks, scores)))
@@ -184,7 +199,6 @@ class Searcher:
                         qid=qids[query_idx],
                     )
                 )
-
             )
             for query_idx in tqdm(range(Q.size(0)))
         ]
@@ -242,4 +256,8 @@ class Searcher:
             self.config, Q, filter_fn=filter_fn, qid=qid
         )
 
+        return pids[:k], list(range(1, k + 1)), scores[:k]
+
+    def dense_precomputed_search(self, Q: torch.Tensor, pids, k=10):
+        pids, scores = self.ranker.rank_precomputed(self.config, Q, pids)
         return pids[:k], list(range(1, k + 1)), scores[:k]

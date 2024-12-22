@@ -144,6 +144,45 @@ class IndexScorer(IndexLoader, CandidateGeneration):
         )
         return all_pids
 
+    def final_ranking(self, config, Q, pids):
+        if self.use_gpu:
+            D_packed, D_mask = self.lookup_pids(pids)
+        else:
+            D_packed = IndexScorer.decompress_residuals(
+                pids,
+                self.doclens,
+                self.embeddings_strided.codes_strided.offsets,
+                self.codec.bucket_weights,
+                self.codec.reversed_bit_map,
+                self.codec.decompression_lookup_table,
+                self.embeddings.residuals,
+                self.embeddings.codes,
+                self.codec.centroids,
+                self.codec.dim,
+                self.codec.nbits,
+            )
+            D_packed = torch.nn.functional.normalize(
+                D_packed.to(torch.float32), p=2, dim=-1
+            )
+            D_mask = self.doclens[pids.long()]
+
+        if Q.size(0) == 1:
+            return colbert_score_packed(Q, D_packed, D_mask, config), pids
+
+        D_strided = StridedTensor(D_packed, D_mask, use_gpu=self.use_gpu)
+        D_padded, D_lengths = D_strided.as_padded_tensor()
+
+        return colbert_score(Q, D_padded, D_lengths, config), pids
+
+    def _sort_pids_scores(self, scores, pids):
+        scores_sorter = scores.sort(descending=True)
+        pids, scores = (
+            pids[scores_sorter.indices].tolist(),
+            scores_sorter.values.tolist(),
+        )
+
+        return pids, scores
+
     def rank(self, config, Q, filter_fn=None, qid: Optional[int] = None):
         with torch.inference_mode():
             pids, centroid_scores, term_ub_scores = self.retrieve(
@@ -159,13 +198,12 @@ class IndexScorer(IndexLoader, CandidateGeneration):
                 config, Q, pids, centroid_scores, term_ub_scores
             )
 
-            scores_sorter = scores.sort(descending=True)
-            pids, scores = (
-                pids[scores_sorter.indices].tolist(),
-                scores_sorter.values.tolist(),
-            )
+            return self._sort_pids_scores(scores, pids)
 
-            return pids, scores
+    def rank_precomputed(self, config, Q, pids):
+        with torch.inference_mode():
+            scores, pids = self.final_ranking(config, Q, pids)
+            return self._sort_pids_scores(scores, pids)
 
     def centroid_pair_rank(self, config, Q, nprobe_top, nprobe_bottom):
         """Rank top and bottom centroid candidates for each term."""
@@ -274,32 +312,6 @@ class IndexScorer(IndexLoader, CandidateGeneration):
 
             pids = IndexScorer.filter_pids(*filter_pids_args)
 
-        # Rank final list of docs using full approximate embeddings (including residuals)
-        if self.use_gpu:
-            D_packed, D_mask = self.lookup_pids(pids)
-        else:
-            D_packed = IndexScorer.decompress_residuals(
-                pids,
-                self.doclens,
-                self.embeddings_strided.codes_strided.offsets,
-                self.codec.bucket_weights,
-                self.codec.reversed_bit_map,
-                self.codec.decompression_lookup_table,
-                self.embeddings.residuals,
-                self.embeddings.codes,
-                self.codec.centroids,
-                self.codec.dim,
-                self.codec.nbits,
-            )
-            D_packed = torch.nn.functional.normalize(
-                D_packed.to(torch.float32), p=2, dim=-1
-            )
-            D_mask = self.doclens[pids.long()]
-
-        if Q.size(0) == 1:
-            return colbert_score_packed(Q, D_packed, D_mask, config), pids
-
-        D_strided = StridedTensor(D_packed, D_mask, use_gpu=self.use_gpu)
-        D_padded, D_lengths = D_strided.as_padded_tensor()
-
-        return colbert_score(Q, D_padded, D_lengths, config), pids
+        # Rank final list of docs using full approximate embeddings
+        # (including residuals)
+        return self.final_ranking(config, Q, pids)
