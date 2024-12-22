@@ -30,7 +30,11 @@ def main(args):
     with open(args.ranking) as f:
         print_message(f"#> Loading ranked lists from {args.ranking} ..")
         for line in file_tqdm(f):
-            qid, pid, rank, *score = line.strip().split('\t')
+            if args.trec:
+                qid, _, pid, rank, score, _ = line.strip().split('\t')
+            else:
+                qid, pid, rank, *score = line.strip().split('\t')
+
             qid, pid, rank = int(qid), int(pid), int(rank)
 
             if len(score) > 0:
@@ -116,6 +120,7 @@ if __name__ == "__main__":
     parser.add_argument('--qrels', dest='qrels', required=True, type=str)
     parser.add_argument('--ranking', dest='ranking', required=True, type=str)
     parser.add_argument('--annotate', dest='annotate', default=False, action='store_true')
+    parser.add_argument("--trec", default=False, action="store_true")
 
     args = parser.parse_args()
 
