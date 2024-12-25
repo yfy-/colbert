@@ -31,18 +31,17 @@ def main(args):
         print_message(f"#> Loading ranked lists from {args.ranking} ..")
         for line in file_tqdm(f):
             if args.trec:
-                qid, _, pid, rank, score, _ = line.strip().split('\t')
+                qid, _, pid, rank, score, _ = line.strip().split()
+                score = float(score)
             else:
                 qid, pid, rank, *score = line.strip().split('\t')
+                if len(score) > 0:
+                    assert len(score) == 1
+                    score = float(score[0])
+                else:
+                    score = None
 
             qid, pid, rank = int(qid), int(pid), int(rank)
-
-            if len(score) > 0:
-                assert len(score) == 1
-                score = float(score[0])
-            else:
-                score = None
-
             qid2ranking[qid].append((rank, pid, score))
 
     # assert set.issubset(set(qid2ranking.keys()), set(qid2positives.keys()))
