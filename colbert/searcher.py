@@ -132,7 +132,9 @@ class Searcher:
                 search_start = time.time()
                 if prec_pids is not None:
                     pids, ranks, scores = self.dense_precomputed_search(
-                        Q[query_idx : query_idx + 1], prec_pids[query_idx], k=k
+                        Q[query_idx : query_idx + 1],
+                        prec_pids[qids[query_idx]],
+                        k=k,
                     )
                 else:
                     pids, ranks, scores = self.dense_search(
