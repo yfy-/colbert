@@ -23,7 +23,7 @@ class CollectionEncoder:
         self.static_prune_func = None
         if self.config.static_pruning_method is not None:
             if (
-                sm := self.config.static_pruning_method
+                (sm := self.config.static_pruning_method)
                 not in self.static_prune_funcs
             ):
                 raise ValueError(f"No such static pruning method: '{sm}'")
