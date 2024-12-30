@@ -163,7 +163,12 @@ class IndexingSettings:
     kmeans_niters: int = DefaultVal(4)
 
     resume: bool = DefaultVal(False)
-    static_prune_ratio: float = DefaultVal(0.0)
+
+    encode_cache_path: str = DefaultVal(None)
+    # Static pruning settings
+    expected_static_prune_ratio: float = DefaultVal(0.0)
+    static_pruning_method: str = DefaultVal(None)
+    static_pruning_kwargs: dict = DefaultVal(None)
 
     @property
     def index_path_(self):
