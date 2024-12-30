@@ -16,7 +16,7 @@ class CollectionEncoder:
         self.checkpoint = checkpoint
         self.use_gpu = self.config.gpus > 0
         self.static_prune_funcs = {
-            "attention": self.attention_prune,
+            "attention": self.att_prune,
             "first_alpha": self.first_alpha_prune,
         }
 
@@ -42,7 +42,7 @@ class CollectionEncoder:
     ) -> torch.Tensor:
         return embs[: self._constant_prune_num(embs.shape[0], prune_ratio)]
 
-    def att_static_prune(
+    def att_prune(
         self, embs: torch.Tensor, prune_ratio=0.25
     ) -> torch.Tensor:
         p_doc_len = self._constant_prune_num(embs.shape[0], prune_ratio)
