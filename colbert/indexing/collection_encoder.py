@@ -16,7 +16,7 @@ class CollectionEncoder:
         self.checkpoint = checkpoint
         self.use_gpu = self.config.gpus > 0
         self.static_prune_funcs = {
-            "attention": self.att_prune,
+            "attention_top": self.att_top_prune,
             "first_alpha": self.first_alpha_prune,
         }
 
@@ -34,18 +34,18 @@ class CollectionEncoder:
         if self.config.encode_cache_path is not None:
             self.cache_path = Path(self.config.encode_cache_path)
 
-    def _constant_prune_num(self, dlen: int, prune_ratio: float) -> int:
-        return int(np.ceil(dlen * (1 - prune_ratio)))
+    def _constant_keep_num(self, dlen: int, keep_ratio: float) -> int:
+        return int(np.ceil(dlen * keep_ratio))
 
     def first_alpha_prune(
-        self, embs: torch.Tensor, prune_ratio=0.25
+        self, embs: torch.Tensor, keep_ratio=0.75
     ) -> torch.Tensor:
-        return embs[: self._constant_prune_num(embs.shape[0], prune_ratio)]
+        return embs[: self._constant_keep_num(embs.shape[0], keep_ratio)]
 
-    def att_prune(
-        self, embs: torch.Tensor, prune_ratio=0.25
+    def att_top_prune(
+        self, embs: torch.Tensor, keep_ratio=0.75
     ) -> torch.Tensor:
-        p_doc_len = self._constant_prune_num(embs.shape[0], prune_ratio)
+        p_doc_len = self._constant_keep_num(embs.shape[0], keep_ratio)
         att_sum = torch.sum(embs @ embs.T, dim=0)
 
         # Keep smallest p_doc_len
