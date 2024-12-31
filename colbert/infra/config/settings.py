@@ -166,7 +166,6 @@ class IndexingSettings:
 
     encode_cache_path: str = DefaultVal(None)
     # Static pruning settings
-    expected_static_prune_ratio: float = DefaultVal(0.0)
     static_pruning_method: str = DefaultVal(None)
     static_pruning_kwargs: dict = DefaultVal(None)
 

@@ -112,11 +112,6 @@ class CollectionIndexer:
         # Select the number of partitions
         num_passages = len(self.collection)
         self.num_embeddings_est = num_passages * avg_doclen_est
-        if self.config.static_pruning_method is not None:
-            self.num_embeddings_est *= (
-                1 - self.config.expected_static_prune_ratio
-            )
-
         self.num_partitions = int(
             2 ** np.floor(np.log2(16 * np.sqrt(self.num_embeddings_est)))
         )
