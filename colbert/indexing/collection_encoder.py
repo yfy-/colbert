@@ -66,16 +66,18 @@ class CollectionEncoder:
     ) -> torch.Tensor:
         adj = (embs @ embs.T) >= edge_threshold
         adj[torch.eye(len(adj), dtype=torch.bool)] = False
-        keep_mask = torch.ones(len(embs), dtype=torch.bool)
+        keep_mask = torch.zeros(len(embs), dtype=torch.bool)
+
+        # Always keep vertices without edges
+        keep_mask[torch.sum(adj, dim=1) == 0] = True
 
         # Greedily remove the embedding with lowest degree larger than 0.
         while adj.any():
             degree = torch.sum(adj, dim=1)
-            dsorted_vals, dsorted_idxs = torch.sort(degree)
-            prune_idx = dsorted_idxs[dsorted_vals.nonzero()[0]].item()
-            keep_mask[prune_idx] = False
-            adj[prune_idx, :] = False
-            adj[:, prune_idx] = False
+            keep_idx = torch.argmax(degree).item()
+            keep_mask[keep_idx] = True
+            adj[keep_idx, :] = False
+            adj[:, keep_idx] = False
 
         return embs[keep_mask]
 
