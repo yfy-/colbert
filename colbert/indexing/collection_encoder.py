@@ -65,7 +65,7 @@ class CollectionEncoder:
         self, embs: torch.Tensor, edge_threshold=0.8
     ) -> torch.Tensor:
         adj = (embs @ embs.T) >= edge_threshold
-        adj[torch.eye(len(adj))] = False
+        adj[torch.eye(len(adj), dtype=torch.int)] = False
         keep_mask = torch.ones(len(embs), dtype=torch.bool)
 
         # Greedily remove the embedding with lowest degree larger than 0.
