@@ -79,9 +79,6 @@ class CollectionEncoder:
 
         return embs[keep_mask]
 
-
-
-
     def static_prune(
         self, embs: torch.Tensor, doclens: List[int], **prune_kwargs
     ) -> Tuple[torch.Tensor, List[int]]:
