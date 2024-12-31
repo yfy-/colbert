@@ -19,6 +19,7 @@ class CollectionEncoder:
             "att_top": self.att_top_keep,
             "att_bottom": self.att_bottom_keep,
             "first": self.first_keep,
+            "att_greedy_mvc": self.att_greedy_mvc,
         }
 
         self.static_prune_func = None
@@ -37,9 +38,7 @@ class CollectionEncoder:
     def _constant_keep_num(self, dlen: int, keep_ratio: float) -> int:
         return int(np.ceil(dlen * keep_ratio))
 
-    def first_keep(
-        self, embs: torch.Tensor, keep_ratio=0.75
-    ) -> torch.Tensor:
+    def first_keep(self, embs: torch.Tensor, keep_ratio=0.75) -> torch.Tensor:
         return embs[: self._constant_keep_num(embs.shape[0], keep_ratio)]
 
     def _att_keep(self, embs: torch.Tensor, keep_ratio=0.75, keep_top=False):
@@ -54,15 +53,34 @@ class CollectionEncoder:
 
         return embs[keep_dims]
 
-    def att_top_keep(
-        self, embs: torch.Tensor, keep_ratio=0.75
-    ) -> torch.Tensor:
+    def att_top_keep(self, embs: torch.Tensor, keep_ratio=0.75) -> torch.Tensor:
         return self._att_keep(embs, keep_ratio=keep_ratio, keep_top=True)
 
     def att_bottom_keep(
         self, embs: torch.Tensor, keep_ratio=0.75
     ) -> torch.Tensor:
         return self._att_keep(embs, keep_ratio=keep_ratio, keep_top=False)
+
+    def att_greedy_mvc(
+        self, embs: torch.Tensor, edge_threshold=0.8
+    ) -> torch.Tensor:
+        adj = (embs @ embs.T) >= edge_threshold
+        adj[torch.eye(len(adj))] = False
+        keep_mask = torch.ones(len(embs), dtype=torch.bool)
+
+        # Greedily remove the embedding with lowest degree larger than 0.
+        while adj.any():
+            degree = torch.sum(adj, dim=1)
+            dsorted_vals, dsorted_idxs = torch.sort(degree)
+            prune_idx = dsorted_idxs[dsorted_vals.nonzero()[0]].item()
+            keep_mask[prune_idx] = False
+            adj[prune_idx, :] = False
+            adj[:, prune_idx] = False
+
+        return embs[keep_mask]
+
+
+
 
     def static_prune(
         self, embs: torch.Tensor, doclens: List[int], **prune_kwargs
