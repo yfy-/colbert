@@ -16,16 +16,16 @@ class CollectionEncoder:
         self.checkpoint = checkpoint
         self.use_gpu = self.config.gpus > 0
         self.static_prune_funcs = {
-            "attention_top": self.att_top_prune,
-            "first_alpha": self.first_alpha_prune,
+            "att_top": self.att_top_keep,
+            "att_bottom": self.att_bottom_keep,
+            "first": self.first_keep,
         }
 
         self.static_prune_func = None
         if self.config.static_pruning_method is not None:
             if (
-                (sm := self.config.static_pruning_method)
-                not in self.static_prune_funcs
-            ):
+                sm := self.config.static_pruning_method
+            ) not in self.static_prune_funcs:
                 raise ValueError(f"No such static pruning method: '{sm}'")
 
             self.static_prune_func = self.static_prune_funcs[sm]
@@ -37,24 +37,32 @@ class CollectionEncoder:
     def _constant_keep_num(self, dlen: int, keep_ratio: float) -> int:
         return int(np.ceil(dlen * keep_ratio))
 
-    def first_alpha_prune(
+    def first_keep(
         self, embs: torch.Tensor, keep_ratio=0.75
     ) -> torch.Tensor:
         return embs[: self._constant_keep_num(embs.shape[0], keep_ratio)]
 
-    def att_top_prune(
-        self, embs: torch.Tensor, keep_ratio=0.75
-    ) -> torch.Tensor:
+    def _att_keep(self, embs: torch.Tensor, keep_ratio=0.75, keep_top=False):
         p_doc_len = self._constant_keep_num(embs.shape[0], keep_ratio)
         att_sum = torch.sum(embs @ embs.T, dim=0)
 
         # Keep smallest p_doc_len
-        keep_dims = torch.argsort(att_sum)[:p_doc_len]
+        keep_dims = torch.argsort(att_sum, descending=keep_top)[:p_doc_len]
 
         # Sort from smallest index to largest to not mix the order
         keep_dims = torch.sort(keep_dims).values
 
         return embs[keep_dims]
+
+    def att_top_keep(
+        self, embs: torch.Tensor, keep_ratio=0.75
+    ) -> torch.Tensor:
+        return self._att_keep(embs, keep_ratio=keep_ratio, keep_top=True)
+
+    def att_bottom_keep(
+        self, embs: torch.Tensor, keep_ratio=0.75
+    ) -> torch.Tensor:
+        return self._att_keep(embs, keep_ratio=keep_ratio, keep_top=False)
 
     def static_prune(
         self, embs: torch.Tensor, doclens: List[int], **prune_kwargs
