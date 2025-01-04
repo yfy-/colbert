@@ -43,15 +43,19 @@ class CollectionEncoder:
 
     def _att_keep(self, embs: torch.Tensor, keep_ratio=0.75, keep_top=False):
         p_doc_len = self._constant_keep_num(embs.shape[0], keep_ratio)
-        att_sum = torch.sum(embs @ embs.T, dim=0)
 
-        # Keep smallest p_doc_len
-        keep_dims = torch.argsort(att_sum, descending=keep_top)[:p_doc_len]
+        # Discard first 2 (CLS and D) from evaluation
+        cand_embs = embs[2:, :]
+        att_sum = torch.sum(cand_embs @ cand_embs.T, dim=0)
+
+        # Keep smallest p_doc_len - 2
+        keep_dims = torch.argsort(att_sum, descending=keep_top)[:p_doc_len - 2]
 
         # Sort from smallest index to largest to not mix the order
         keep_dims = torch.sort(keep_dims).values
 
-        return embs[keep_dims]
+        # Always include CLS and D in the result
+        return torch.cat((embs[:2, :], cand_embs[keep_dims]))
 
     def att_top_keep(self, embs: torch.Tensor, keep_ratio=0.75) -> torch.Tensor:
         return self._att_keep(embs, keep_ratio=keep_ratio, keep_top=True)
