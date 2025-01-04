@@ -75,7 +75,7 @@ class CollectionEncoder:
         # Always keep vertices without edges
         keep_mask[torch.sum(adj, dim=1) == 0] = True
 
-        # Greedily remove the embedding with lowest degree larger than 0.
+        # Greedily keep the embedding with highest degree.
         while adj.any():
             degree = torch.sum(adj, dim=1)
             keep_idx = torch.argmax(degree).item()
