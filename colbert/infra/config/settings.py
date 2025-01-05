@@ -167,7 +167,7 @@ class IndexingSettings:
     encode_cache_path: str = DefaultVal(None)
     # Static pruning settings
     static_pruning_method: str = DefaultVal(None)
-    static_pruning_kwargs: dict = DefaultVal(None)
+    static_pruning_kwargs: dict = DefaultVal(dict())
 
     @property
     def index_path_(self):

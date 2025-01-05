@@ -1,9 +1,14 @@
 from __future__ import annotations
+import itertools
+import os
 from pathlib import Path
 from typing import List, Tuple
 
-import torch
+import jgrapht
 import numpy as np
+import torch
+from torch.utils.cpp_extension import load
+
 
 from colbert.infra.run import Run
 from colbert.utils.utils import print_message, batch
@@ -15,6 +20,8 @@ class CollectionEncoder:
         self.config = config
         self.checkpoint = checkpoint
         self.use_gpu = self.config.gpus > 0
+        # self.try_load_torch_extensions(self.config.static_pruning_method)
+
         self.static_prune_funcs = {
             "att_top": self.att_top_keep,
             "att_bottom": self.att_bottom_keep,
@@ -35,6 +42,29 @@ class CollectionEncoder:
         if self.config.encode_cache_path is not None:
             self.cache_path = Path(self.config.encode_cache_path)
 
+    @classmethod
+    def try_load_torch_extensions(cls, prune_method: str):
+        if (
+            hasattr(cls, "loaded_extensions")
+            or prune_method != "att_exhaustive_mvc"
+        ):
+            return
+
+        print_message(
+            "Loading att_exhaustive_mvc extension "
+            "(set COLBERT_LOAD_TORCH_EXTENSION_VERBOSE=True for more info)..."
+        )
+        att_exhaustive_mvc_cpp = load(
+            name="att_exhaustive_mvc_cpp",
+            sources=[
+                str(Path(__file__).parent.resolve() / "att_exhaustive_mvc.cpp")
+            ],
+            extra_cflags=["-O3"],
+            verbose=os.getenv("COLBERT_LOAD_TORCH_EXTENSION_VERBOSE", "False")
+            == "True",
+        )
+        cls.att_exhaustive_mvc = att_exhaustive_mvc_cpp.att_exhaustive_mvc_cpp
+
     def _constant_keep_num(self, dlen: int, keep_ratio: float) -> int:
         return int(np.ceil(dlen * keep_ratio))
 
@@ -49,7 +79,7 @@ class CollectionEncoder:
         att_sum = torch.sum(cand_embs @ cand_embs.T, dim=0)
 
         # Keep smallest p_doc_len - 2
-        keep_dims = torch.argsort(att_sum, descending=keep_top)[:p_doc_len - 2]
+        keep_dims = torch.argsort(att_sum, descending=keep_top)[: p_doc_len - 2]
 
         # Sort from smallest index to largest to not mix the order
         keep_dims = torch.sort(keep_dims).values
@@ -65,23 +95,73 @@ class CollectionEncoder:
     ) -> torch.Tensor:
         return self._att_keep(embs, keep_ratio=keep_ratio, keep_top=False)
 
+    # def att_greedy_mvc(
+    #     self, embs: torch.Tensor, edge_threshold=0.8
+    # ) -> torch.Tensor:
+    #     adj = (embs @ embs.T) >= edge_threshold
+    #     adj[torch.eye(len(adj), dtype=torch.bool)] = False
+    #     keep_mask = torch.zeros(len(embs), dtype=torch.bool)
+
+    #     # Always keep vertices without edges
+    #     keep_mask[torch.sum(adj, dim=1) == 0] = True
+
+    #     # Greedily keep the embedding with highest degree.
+    #     while adj.any():
+    #         degree = torch.sum(adj, dim=1)
+    #         keep_idx = torch.argmax(degree).item()
+    #         keep_mask[keep_idx] = True
+    #         adj[keep_idx, :] = False
+    #         adj[:, keep_idx] = False
+
+    #     return embs[keep_mask]
+
     def att_greedy_mvc(
         self, embs: torch.Tensor, edge_threshold=0.8
     ) -> torch.Tensor:
         adj = (embs @ embs.T) >= edge_threshold
         adj[torch.eye(len(adj), dtype=torch.bool)] = False
-        keep_mask = torch.zeros(len(embs), dtype=torch.bool)
 
-        # Always keep vertices without edges
+        # Disconnect [CLS] and [D] tokens.
+        adj[:2, :] = False
+        adj[:, :2] = False
+
+        # Always keep disconnected vertices.
+        keep_mask = torch.zeros(len(embs), dtype=torch.bool)
         keep_mask[torch.sum(adj, dim=1) == 0] = True
 
-        # Greedily keep the embedding with highest degree.
-        while adj.any():
-            degree = torch.sum(adj, dim=1)
-            keep_idx = torch.argmax(degree).item()
-            keep_mask[keep_idx] = True
-            adj[keep_idx, :] = False
-            adj[:, keep_idx] = False
+        doclen = len(adj)
+        graph = jgrapht.create_graph(directed=False, weighted=False)
+        graph.add_vertices_from(range(doclen))
+        for i in range(doclen):
+            for j in range(i + 1, doclen):
+                if adj[i][j].item():
+                    graph.add_edge(i, j)
+
+        _, vertex_set = jgrapht.algorithms.vertexcover.greedy(graph)
+        keep_mask[list(vertex_set)] = True
+
+        # mvc_cand = torch.zeros_like(adj, dtype=torch.bool)
+        # emb_ids = range(doclen)
+        # found = False
+        # print_message(f"Solving MVC for size={doclen}")
+        # for mvc_len in range(1, doclen + 1):
+        #     print_message(f"Trying with size={mvc_len}")
+        #     for idx_s in itertools.combinations(emb_ids, mvc_len):
+        #         mvc_cand[idx_s, :] = adj[idx_s, :]
+        #         mvc_cand[:, idx_s] = adj[:, idx_s]
+        #         if (mvc_cand == adj).all():
+        #             found = True
+        #             print_message(f"MVC found with size={len(idx_s)}")
+        #             keep_mask[idx_s] = True
+        #             break
+        #         else:
+        #             mvc_cand.zero_()
+
+        #     if found:
+        #         break
+
+        # if not found:
+        #     raise ValueError("could not find MVC!")
 
         return embs[keep_mask]
 
@@ -103,6 +183,7 @@ class CollectionEncoder:
             pruned_embs.append(pd_embs.to("cpu"))
             pruned_doclens.append(pd_embs.shape[0])
 
+        print(f"Avg doclen after pruning: {np.mean(pruned_doclens)}")
         return torch.cat(pruned_embs), pruned_doclens
 
     def encode_passages(self, passages, chunk_idx=None):
