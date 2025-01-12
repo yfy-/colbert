@@ -130,7 +130,9 @@ class Searcher:
         for run in tqdm(range(num_run), desc="Run loop"):
             for query_idx in tqdm(range(num_q), desc="Query loop"):
                 if prec_pids is not None:
-                    q_prec_pids = prec_pids[qids[query_idx]].type(torch.int32)
+                    q_prec_pids = prec_pids[qids[query_idx]].type(torch.int32)[
+                        :k
+                    ]
                     search_start = time.time()
                     pids, ranks, scores = self.dense_precomputed_search(
                         Q[query_idx : query_idx + 1],
