@@ -115,37 +115,41 @@ class CollectionEncoder:
         # Greedily keep the embedding with highest degree.
         while adj.any():
             degree = torch.sum(adj, dim=1)
-            keep_idx = torch.argmax(degree).item()
+            # Add an increasing small number to larger indices so that
+            # ties are broken in favor of smaller indices.
+            keep_idx = torch.argmax(
+                degree + (torch.arange(len(adj)) * 1e-6)
+            ).item()
             keep_mask[keep_idx] = True
             adj[keep_idx, :] = False
             adj[:, keep_idx] = False
 
         return embs[keep_mask]
 
-    # def att_greedy_mvc(
-    #     self, embs: torch.Tensor, edge_threshold=0.8
-    # ) -> torch.Tensor:
-    #     adj = (embs @ embs.T) >= edge_threshold
-    #     adj[torch.eye(len(adj), dtype=torch.bool)] = False
+        # def att_greedy_mvc(
+        #     self, embs: torch.Tensor, edge_threshold=0.8
+        # ) -> torch.Tensor:
+        #     adj = (embs @ embs.T) >= edge_threshold
+        #     adj[torch.eye(len(adj), dtype=torch.bool)] = False
 
-    #     # Disconnect [CLS] and [D] tokens.
-    #     adj[:2, :] = False
-    #     adj[:, :2] = False
+        #     # Disconnect [CLS] and [D] tokens.
+        #     adj[:2, :] = False
+        #     adj[:, :2] = False
 
-    #     # Always keep disconnected vertices.
-    #     keep_mask = torch.zeros(len(embs), dtype=torch.bool)
-    #     keep_mask[torch.sum(adj, dim=1) == 0] = True
+        #     # Always keep disconnected vertices.
+        #     keep_mask = torch.zeros(len(embs), dtype=torch.bool)
+        #     keep_mask[torch.sum(adj, dim=1) == 0] = True
 
-    #     doclen = len(adj)
-    #     graph = jgrapht.create_graph(directed=False, weighted=False)
-    #     graph.add_vertices_from(range(doclen))
-    #     for i in range(doclen):
-    #         for j in range(i + 1, doclen):
-    #             if adj[i][j].item():
-    #                 graph.add_edge(i, j)
+        #     doclen = len(adj)
+        #     graph = jgrapht.create_graph(directed=False, weighted=False)
+        #     graph.add_vertices_from(range(doclen))
+        #     for i in range(doclen):
+        #         for j in range(i + 1, doclen):
+        #             if adj[i][j].item():
+        #                 graph.add_edge(i, j)
 
-    #     _, vertex_set = jgrapht.algorithms.vertexcover.greedy(graph)
-    #     keep_mask[list(vertex_set)] = True
+        #     _, vertex_set = jgrapht.algorithms.vertexcover.greedy(graph)
+        #     keep_mask[list(vertex_set)] = True
 
         # mvc_cand = torch.zeros_like(adj, dtype=torch.bool)
         # emb_ids = range(doclen)
@@ -170,7 +174,7 @@ class CollectionEncoder:
         # if not found:
         #     raise ValueError("could not find MVC!")
 
-        return embs[keep_mask]
+        # return embs[keep_mask]
 
     def static_prune(
         self, embs: torch.Tensor, doclens: List[int], **prune_kwargs
