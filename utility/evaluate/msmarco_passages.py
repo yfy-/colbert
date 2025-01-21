@@ -22,10 +22,12 @@ def main(args):
     with open(args.qrels) as f:
         print_message(f"#> Loading QRELs from {args.qrels} ..")
         for line in file_tqdm(f):
-            qid, _, pid, label = map(int, line.strip().split())
-            assert label == 1
-
-            qid2positives[qid].append(pid)
+            qid, _, pid, label = line.strip().split()
+            qid = int(qid)
+            pid = int(pid)
+            label = int(label)
+            if label > 0:
+                qid2positives[qid].append(pid)
 
     with open(args.ranking) as f:
         print_message(f"#> Loading ranked lists from {args.ranking} ..")

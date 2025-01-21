@@ -108,11 +108,12 @@ class CollectionEncoder:
         adj[:2, :] = False
         adj[:, :2] = False
 
-        # Always keep vertices without edges
-        keep_mask = torch.zeros(len(embs), dtype=torch.bool)
-        keep_mask[torch.sum(adj, dim=1) == 0] = True
+        keep_mask = torch.ones(len(embs), dtype=torch.bool)
 
-        # Greedily keep the embedding with highest degree.
+        # Always keep vertices without edges
+        # keep_mask[torch.sum(adj, dim=1) == 0] = True
+
+        # Greedily remove the embedding with highest degree.
         while adj.any():
             degree = torch.sum(adj, dim=1)
             # Add an increasing small number to larger indices so that
@@ -120,7 +121,7 @@ class CollectionEncoder:
             keep_idx = torch.argmax(
                 degree + (torch.arange(len(adj)) * 1e-6)
             ).item()
-            keep_mask[keep_idx] = True
+            keep_mask[keep_idx] = False
             adj[keep_idx, :] = False
             adj[:, keep_idx] = False
 
