@@ -118,9 +118,11 @@ class CollectionEncoder:
             degree = torch.sum(adj, dim=1)
             # Add an increasing small number to larger indices so that
             # ties are broken in favor of smaller indices.
-            keep_idx = torch.argmax(
-                degree + (torch.arange(len(adj)) * 1e-6)
-            ).item()
+            small_diff = (
+                torch.arange(len(adj), device="cuda" if self.use_gpu else None)
+                * 1e-6
+            )
+            keep_idx = torch.argmax(degree + small_diff).item()
             keep_mask[keep_idx] = False
             adj[keep_idx, :] = False
             adj[:, keep_idx] = False
