@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import argparse
+from functools import partial
+import multiprocessing
 import os.path as osp
 import torch
 from tqdm import tqdm
@@ -108,24 +110,38 @@ if __name__ == "__main__":
             loader.codec, loader.embeddings, loader.doclens
         )
         n = len(lengths)
-        cid_pids = []
-        with tqdm(total=n, desc="Find closest passage to centroid") as pbar:
-            for i in range(n):
-                pids = all_pids[offsets[i] : offsets[i + 1]]
-                if args.order_method == "similar":
-                    pids_sorted = sort_similar(pids, device, centroids, i)
-                elif args.order_method == "count":
-                    pids_sorted = sort_count(
-                        pids,
-                        loader.doclens,
-                        embs_strided.codes,
-                        embs_strided.codes_strided.offsets,
-                        i,
-                    )
-                else:
-                    raise ValueError(f"no such method: {args.order_method}")
+        with multiprocessing.Pool(8) as p:
+            sort_partial = partial(
+                sort_count,
+                doclens=loader.doclens,
+                codes=embs_strided.codes,
+                code_offsets=embs_strided.codes_strided.offets,
+            )
+            rest_args = [
+                (all_pids[offsets[i] : offsets[i + 1]], i) for i in range(n)
+            ]
+            cid_pids = p.starmap(
+                sort_partial,
+                tqdm(
+                    rest_args, total=n, desc="Find closest passage to centroid"
+                ),
+            )
+            # for i in range(n):
+            #     pids = all_pids[offsets[i] : offsets[i + 1]]
+            #     if args.order_method == "similar":
+            #         pids_sorted = sort_similar(pids, device, centroids, i)
+            #     elif args.order_method == "count":
+            #         pids_sorted = sort_count(
+            #             pids,
+            #             loader.doclens,
+            #             embs_strided.codes,
+            #             embs_strided.codes_strided.offsets,
+            #             i,
+            #         )
+            #     else:
+            #         raise ValueError(f"no such method: {args.order_method}")
 
-                cid_pids.append(pids_sorted)
-                pbar.update(1)
+            #     cid_pids.append(pids_sorted)
+            #     pbar.update(1)
 
         torch.save(cid_pids, osp.join(index_path, args.out_filename))
