@@ -115,7 +115,7 @@ if __name__ == "__main__":
                 sort_count,
                 doclens=loader.doclens,
                 codes=embs_strided.codes,
-                code_offsets=embs_strided.codes_strided.offets,
+                code_offsets=embs_strided.codes_strided.offsets,
             )
             rest_args = [
                 (all_pids[offsets[i] : offsets[i + 1]], i) for i in range(n)
