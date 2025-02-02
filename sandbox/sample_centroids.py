@@ -28,9 +28,6 @@ def sort_count(
             if curr_code.item() == centroid_idx:
                 counts[i] += 1
 
-    if (counts == 0).any():
-        raise Exception("passage with 0 count")
-
     return torch.argsort(counts, descending=True)
 
 
