@@ -4,6 +4,8 @@ import argparse
 from functools import partial
 import multiprocessing
 import os.path as osp
+from typing import Tuple
+
 import torch
 from tqdm import tqdm
 
@@ -15,13 +17,13 @@ from colbert.indexing.codecs.residual_embeddings_strided import (
 
 
 def sort_count(
-    pids: torch.Tensor,
+    pids_centroid_idx: Tuple[torch.Tensor, int],
     doclens: torch.Tensor,
     codes: torch.Tensor,
     code_offsets: torch.Tensor,
-    centroid_idx: int,
 ) -> torch.Tensor:
     """Sort pids by their count of embeddings in the cluster."""
+    pids, centroid_idx = pids_centroid_idx
     n = len(pids)
     counts = torch.zeros(n, dtype=torch.int32, device="cpu")
     for i, p in enumerate(pids):
@@ -120,12 +122,14 @@ if __name__ == "__main__":
             rest_args = [
                 (all_pids[offsets[i] : offsets[i + 1]], i) for i in range(n)
             ]
-            cid_pids = p.starmap(
-                sort_partial,
+            cid_pids = list(
                 tqdm(
-                    rest_args, total=n, desc="Find closest passage to centroid"
-                ),
+                    p.imap(sort_partial, rest_args),
+                    total=n,
+                    desc="Find closest passage to centroid",
+                )
             )
+
             # for i in range(n):
             #     pids = all_pids[offsets[i] : offsets[i + 1]]
             #     if args.order_method == "similar":
