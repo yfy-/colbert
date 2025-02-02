@@ -23,8 +23,8 @@ def sort_count(
     """Sort pids by their count of embeddings in the cluster."""
     counts = torch.zeros(len(pids), dtype=torch.int32, device="cpu")
     for i, p in enumerate(pids):
-        for i in range(doclens[p]):
-            curr_code = codes[code_offsets[p] + i]
+        for j in range(doclens[p]):
+            curr_code = codes[code_offsets[p] + j]
             if curr_code.item() == centroid_idx:
                 counts[i] += 1
 
@@ -107,7 +107,6 @@ if __name__ == "__main__":
         embs_strided = ResidualEmbeddingsStrided(
             loader.codec, loader.embeddings, loader.doclens
         )
-        embs_strided.codes_strided.offsets
         n = len(lengths)
         cid_pids = torch.full(
             (n, torch.max(lengths)), -1, dtype=int, device="cpu"
