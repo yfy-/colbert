@@ -36,12 +36,12 @@ def sort_count(
 
 
 def sort_similar(
-    pids: torch.Tensor,
+    pids_centroid_idx: Tuple[torch.Tensor, int],
     device: str,
     centroids: torch.Tensor,
-    centroid_idx: int,
 ) -> torch.Tensor:
     """Sort pids by their similarity to centroid."""
+    pids, centroid_idx = pids_centroid_idx
     pids_embs, pids_lengths = embs_strided.lookup_pids(pids)
     pids_embs = pids_embs.to(device)
     pids_lengths = pids_lengths.to(device)
@@ -96,6 +96,7 @@ if __name__ == "__main__":
         default="cuda",
         help="Pytorch device.",
     )
+    parser.add_argument("-j", "--jobs", type=int, default=8)
     args = parser.parse_args()
     device = args.device
     with Run().context(RunConfig(nranks=1)):
@@ -112,13 +113,21 @@ if __name__ == "__main__":
             loader.codec, loader.embeddings, loader.doclens
         )
         n = len(lengths)
-        with multiprocessing.Pool(8) as p:
-            sort_partial = partial(
-                sort_count,
-                doclens=loader.doclens,
-                codes=embs_strided.codes,
-                code_offsets=embs_strided.codes_strided.offsets,
-            )
+        with multiprocessing.Pool(args.jobs) as p:
+            if args.order_method == "similar":
+                sort_partial = partial(
+                    sort_similar, device=device, centroids=centroids
+                )
+            elif args.order_method == "count":
+                sort_partial = partial(
+                    sort_count,
+                    doclens=loader.doclens,
+                    codes=embs_strided.codes,
+                    code_offsets=embs_strided.codes_strided.offsets,
+                )
+            else:
+                raise ValueError(f"no such method: {args.order_method}")
+
             rest_args = [
                 (all_pids[offsets[i] : offsets[i + 1]], i) for i in range(n)
             ]
@@ -126,26 +135,8 @@ if __name__ == "__main__":
                 tqdm(
                     p.imap(sort_partial, rest_args),
                     total=n,
-                    desc="Find closest passage to centroid",
+                    desc=f"Sorting centroid passages by {args.order_method}",
                 )
             )
-
-            # for i in range(n):
-            #     pids = all_pids[offsets[i] : offsets[i + 1]]
-            #     if args.order_method == "similar":
-            #         pids_sorted = sort_similar(pids, device, centroids, i)
-            #     elif args.order_method == "count":
-            #         pids_sorted = sort_count(
-            #             pids,
-            #             loader.doclens,
-            #             embs_strided.codes,
-            #             embs_strided.codes_strided.offsets,
-            #             i,
-            #         )
-            #     else:
-            #         raise ValueError(f"no such method: {args.order_method}")
-
-            #     cid_pids.append(pids_sorted)
-            #     pbar.update(1)
 
         torch.save(cid_pids, osp.join(index_path, args.out_filename))
