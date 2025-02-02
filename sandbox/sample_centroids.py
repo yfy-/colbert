@@ -25,7 +25,7 @@ def sort_count(
     for i, p in enumerate(pids):
         for i in range(doclens[p]):
             curr_code = codes[code_offsets[p] + i]
-            if curr_code == centroid_idx:
+            if curr_code.item() == centroid_idx:
                 counts[i] += 1
 
     if (counts == 0).any():
