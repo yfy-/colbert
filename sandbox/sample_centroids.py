@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
 
 import argparse
-from functools import partial
 import multiprocessing
 import os.path as osp
+from functools import partial
 from typing import Tuple
 
 import torch
 from tqdm import tqdm
 
-from colbert.infra import Run, RunConfig, ColBERTConfig
+from colbert.indexing.codecs.residual_embeddings_strided import \
+    ResidualEmbeddingsStrided
+from colbert.infra import ColBERTConfig, Run, RunConfig
 from colbert.search.index_storage import IndexLoader
-from colbert.indexing.codecs.residual_embeddings_strided import (
-    ResidualEmbeddingsStrided,
-)
 
 
 def sort_count(
@@ -113,30 +112,41 @@ if __name__ == "__main__":
             loader.codec, loader.embeddings, loader.doclens
         )
         n = len(lengths)
-        with multiprocessing.Pool(args.jobs) as p:
-            if args.order_method == "similar":
-                sort_partial = partial(
-                    sort_similar, device=device, centroids=centroids
-                )
-            elif args.order_method == "count":
-                sort_partial = partial(
-                    sort_count,
-                    doclens=loader.doclens,
-                    codes=embs_strided.codes,
-                    code_offsets=embs_strided.codes_strided.offsets,
-                )
-            else:
-                raise ValueError(f"no such method: {args.order_method}")
+        if args.order_method == "similar":
+            sort_partial = partial(
+                sort_similar, device=device, centroids=centroids
+            )
+        elif args.order_method == "count":
+            sort_partial = partial(
+                sort_count,
+                doclens=loader.doclens,
+                codes=embs_strided.codes,
+                code_offsets=embs_strided.codes_strided.offsets,
+            )
+        else:
+            raise ValueError(f"no such method: {args.order_method}")
 
-            rest_args = [
-                (all_pids[offsets[i] : offsets[i + 1]], i) for i in range(n)
-            ]
+        rest_args = [
+            (all_pids[offsets[i] : offsets[i + 1]], i) for i in range(n)
+        ]
+
+        if args.jobs == 1:
             cid_pids = list(
                 tqdm(
-                    p.imap(sort_partial, rest_args),
+                    map(sort_partial, rest_args),
                     total=n,
                     desc=f"Sorting centroid passages by {args.order_method}",
                 )
             )
+        else:
+            with multiprocessing.Pool(args.jobs) as p:
+                cid_pids = list(
+                    tqdm(
+                        p.imap(sort_partial, rest_args),
+                        total=n,
+                        desc="Sorting centroid passages by "
+                        f"{args.order_method}",
+                    )
+                )
 
         torch.save(cid_pids, osp.join(index_path, args.out_filename))
