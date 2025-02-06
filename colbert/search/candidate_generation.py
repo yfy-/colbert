@@ -1,9 +1,10 @@
-import torch
 import time
 from typing import Optional
 
+import torch
+
+from colbert.data import SparseQuery
 from colbert.search.strided_tensor import StridedTensor
-from .strided_tensor_core import _create_mask, _create_view
 
 
 class CandidateGeneration:
@@ -11,7 +12,8 @@ class CandidateGeneration:
     def __init__(self, use_gpu=True):
         self.use_gpu = use_gpu
 
-    def get_cells(self, Q, ncells, qid: Optional[int] = None):
+    def get_cells(self, Q, ncells, sparse_query: Optional[SparseQuery] = None):
+        _ = sparse_query
         scores = self.codec.centroids @ Q.T
         if ncells == 1:
             cells = scores.argmax(dim=0, keepdim=True).permute(1, 0)
@@ -23,8 +25,19 @@ class CandidateGeneration:
         cells = cells.unique(sorted=False)
         return cells, scores, None
 
-    def get_cells_precomputed(self, Q, ncells, qid: int):
-        cells = self.precomputed_centroids[qid].contiguous()
+    def get_cells_sparcent(
+        self, Q, ncells, sparse_query: Optional[SparseQuery] = None
+    ):
+        if sparse_query is None:
+            raise ValueError("sparse query cannot be null.")
+
+        cells = self.sparcent_index.search_quantized(
+            sparse_query,
+            k=self.sparcent_k_score,
+            alpha=self.sparcent_alpha,
+            beta=self.sparcent_beta,
+        )[0]
+        cells = torch.IntTensor(list(map(int, cells)))
         if self.use_gpu:
             cells = cells.to("cuda")
 
@@ -44,7 +57,10 @@ class CandidateGeneration:
         reranked_idxs = reranked_idxs.flatten().unique(sorted=False)
         return cells[reranked_idxs], self.pre_alloc_scores, None
 
-    def get_cells_term_ub_scores(self, Q, ncells, qid: Optional[int] = None):
+    def get_cells_term_ub_scores(
+        self, Q, ncells, sparse_query: Optional[SparseQuery] = None
+    ):
+        _ = sparse_query
         scores = self.codec.centroids @ Q.T
         if ncells == 1:
             scores_topk = scores.max(dim=0, keepdim=True)
@@ -78,9 +94,13 @@ class CandidateGeneration:
             eids = eids.cuda()
         return eids, scores
 
-    def generate_candidate_pids(self, Q, ncells, qid: Optional[int] = None):
+    def generate_candidate_pids(
+        self, Q, ncells, sparse_query: SparseQuery = None
+    ):
         cand_beg = time.time()
-        cells, scores, term_ub_scores = self.get_cells_func(Q, ncells, qid=qid)
+        cells, scores, term_ub_scores = self.get_cells_func(
+            Q, ncells, sparse_query=sparse_query
+        )
         # cells, scores = self.get_cells(Q, ncells)
         elapsed_ms = (time.time() - cand_beg) * 1000
         self.tot_time += elapsed_ms
@@ -98,7 +118,9 @@ class CandidateGeneration:
             E = E.cuda()
         return (Q.unsqueeze(0) @ E.unsqueeze(2)).squeeze(-1).T
 
-    def generate_candidates(self, config, Q, qid: Optional[int] = None):
+    def generate_candidates(
+        self, config, Q, sparse_query: Optional[SparseQuery] = None
+    ):
         ncells = config.ncells
 
         assert isinstance(self.ivf, StridedTensor)
@@ -109,7 +131,7 @@ class CandidateGeneration:
         assert Q.dim() == 2
 
         pids, centroid_scores, term_ub_scores = self.generate_candidate_pids(
-            Q, ncells, qid=qid
+            Q, ncells, sparse_query=sparse_query
         )
 
         if not self.filter_pids_maxscore:

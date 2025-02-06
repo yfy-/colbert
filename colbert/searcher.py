@@ -1,22 +1,19 @@
-import os
-import torch
 import json
+import os
+import time
+from typing import Optional, Union
 
+import torch
 from tqdm import tqdm
-from typing import Union, Optional
 
-from colbert.data import Collection, Queries, Ranking
-
-from colbert.modeling.checkpoint import Checkpoint
-from colbert.search.index_storage import IndexScorer
-
+from colbert.data import Collection, Queries, Ranking, SparseQuery
+from colbert.infra.config import ColBERTConfig
+from colbert.infra.launcher import print_memory_stats
 from colbert.infra.provenance import Provenance
 from colbert.infra.run import Run
-from colbert.infra.config import ColBERTConfig, RunConfig
-from colbert.infra.launcher import print_memory_stats
+from colbert.modeling.checkpoint import Checkpoint
+from colbert.search.index_storage import IndexScorer
 from colbert.utils.utils import print_message
-
-import time
 
 TextQueries = Union[str, "list[str]", "dict[int, str]", Queries]
 
@@ -51,12 +48,8 @@ class Searcher:
 
         self.ranker = IndexScorer(
             self.index,
+            self.config,
             use_gpu=use_gpu,
-            precomputed_centroid_path=self.config.precomputed_centroid_path,
-            sparcent_k_score=self.config.sparcent_k_score,
-            sparcent_k_rerank=self.config.sparcent_k_rerank,
-            filter_pids_maxscore=self.config.filter_pids_maxscore,
-            maxscore_quantile=self.config.maxscore_quantile,
         )
 
         print_memory_stats()
@@ -234,7 +227,11 @@ class Searcher:
         return Ranking(data=data, provenance=provenance)
 
     def dense_search(
-        self, Q: torch.Tensor, k=10, filter_fn=None, qid: Optional[int] = None
+        self,
+        Q: torch.Tensor,
+        k=10,
+        filter_fn=None,
+        sparse_query: SparseQuery = None,
     ):
         if k <= 10:
             if self.config.ncells is None:
@@ -259,7 +256,7 @@ class Searcher:
                 self.configure(ndocs=max(k * 4, 4096))
 
         pids, scores = self.ranker.rank(
-            self.config, Q, filter_fn=filter_fn, qid=qid
+            self.config, Q, filter_fn=filter_fn, sparse_query=sparse_query
         )
 
         return pids[:k], list(range(1, k + 1)), scores[:k]

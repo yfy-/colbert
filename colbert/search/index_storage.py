@@ -1,28 +1,23 @@
-import torch
-from typing import Optional
-
-from colbert.utils.utils import flatten, print_message
-
-from colbert.indexing.loaders import load_doclens
-from colbert.indexing.codecs.residual_embeddings_strided import (
-    ResidualEmbeddingsStrided,
-)
-
-from colbert.search.strided_tensor import StridedTensor
-from colbert.search.candidate_generation import CandidateGeneration
-
-from .index_loader import IndexLoader
-from colbert.modeling.colbert import (
-    colbert_score,
-    colbert_score_packed,
-    colbert_score_reduce,
-)
-
-from math import ceil
-
 import os
 import pathlib
+from math import ceil
+from typing import Optional
+
+import bmp
+import torch
 from torch.utils.cpp_extension import load
+
+from colbert.data import SparseQuery
+from colbert.indexing.codecs.residual_embeddings_strided import \
+    ResidualEmbeddingsStrided
+from colbert.infra.config import ColBERTConfig
+from colbert.modeling.colbert import (colbert_score, colbert_score_packed,
+                                      colbert_score_reduce)
+from colbert.search.candidate_generation import CandidateGeneration
+from colbert.search.strided_tensor import StridedTensor
+from colbert.utils.utils import print_message
+
+from .index_loader import IndexLoader
 
 
 class IndexScorer(IndexLoader, CandidateGeneration):
@@ -31,12 +26,8 @@ class IndexScorer(IndexLoader, CandidateGeneration):
     def __init__(
         self,
         index_path,
+        config: ColBERTConfig,
         use_gpu=True,
-        precomputed_centroid_path: str = None,
-        sparcent_k_score: int = None,
-        sparcent_k_rerank: int = None,
-        filter_pids_maxscore: bool = False,
-        maxscore_quantile: float = None,
     ):
         super().__init__(index_path=index_path, use_gpu=use_gpu)
         self.tot_time = 0
@@ -44,29 +35,27 @@ class IndexScorer(IndexLoader, CandidateGeneration):
         self.cells_retrieved = []
 
         # search params
-        self.precomputed_centroids = None
         self.get_cells_func = self.get_cells
-        self.filter_pids_maxscore = filter_pids_maxscore
-        self.maxscore_quantile = maxscore_quantile
-        if filter_pids_maxscore:
+        self.filter_pids_maxscore = config.filter_pids_maxscore
+        self.maxscore_quantile = config.maxscore_quantile
+        if self.filter_pids_maxscore:
             self.get_cells_func = self.get_cells_term_ub_scores
             self.__class__.filter_pids_file = "filter_pids_maxscore.cpp"
-        elif precomputed_centroid_path is not None:
+        elif config.sparcent_path is not None:
             if (
-                sparcent_k_score is None
-                or sparcent_k_rerank is None
-                or sparcent_k_rerank < 1
-                or sparcent_k_score < sparcent_k_rerank
+                config.sparcent_k_score is None
+                or config.sparcent_k_rerank is None
+                or config.sparcent_k_rerank < 1
+                or config.sparcent_k_score < config.sparcent_k_rerank
             ):
-                raise ValueError("invalid 'precomputed_num_cand'")
+                raise ValueError("invalid sparcent index parameters")
 
-            prec_cents = torch.load(precomputed_centroid_path)
-            self.precomputed_centroids = {
-                qid: ret_cents[:sparcent_k_score]
-                for qid, ret_cents in prec_cents.items()
-            }
-            self.sparcent_k_rerank = sparcent_k_rerank
-            self.get_cells_func = self.get_cells_precomputed
+            self.sparcent_index = bmp.Searcher(config.sparcent_path)
+            self.sparcent_k_score = config.sparcent_k_score
+            self.sparcent_k_rerank = config.sparcent_k_rerank
+            self.sparcent_alpha = config.sparcent_alpha
+            self.sparcent_beta = config.sparcent_beta
+            self.get_cells_func = self.get_cells_sparcent
 
         IndexScorer.try_load_torch_extensions(use_gpu)
 
@@ -128,12 +117,12 @@ class IndexScorer(IndexLoader, CandidateGeneration):
     def lookup_pids(self, passage_ids, out_device="cuda", return_mask=False):
         return self.embeddings_strided.lookup_pids(passage_ids, out_device)
 
-    def retrieve(self, config, Q, qid: Optional[int] = None):
+    def retrieve(self, config, Q, sparse_query: Optional[SparseQuery] = None):
         Q = Q[
             :, : config.query_maxlen
         ]  # NOTE: Candidate generation uses only the query tokens
         embedding_ids, centroid_scores, term_ub_scores = (
-            self.generate_candidates(config, Q, qid=qid)
+            self.generate_candidates(config, Q, sparse_query=sparse_query)
         )
 
         return embedding_ids, centroid_scores, term_ub_scores
@@ -183,10 +172,16 @@ class IndexScorer(IndexLoader, CandidateGeneration):
 
         return pids, scores
 
-    def rank(self, config, Q, filter_fn=None, qid: Optional[int] = None):
+    def rank(
+        self,
+        config,
+        Q,
+        filter_fn=None,
+        sparse_query: Optional[SparseQuery] = None,
+    ):
         with torch.inference_mode():
             pids, centroid_scores, term_ub_scores = self.retrieve(
-                config, Q, qid=qid
+                config, Q, sparse_query=sparse_query
             )
 
             if filter_fn is not None:

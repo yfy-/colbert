@@ -1,21 +1,36 @@
-from colbert.infra.run import Run
+from collections import defaultdict
 import os
+from pathlib import Path
+from typing import Optional, Dict
+
 import ujson
 
 from colbert.evaluation.loaders import load_queries
+from colbert.infra.run import Run
+
+SparseQuery = Dict[str, int]
 
 # TODO: Look up path in some global [per-thread or thread-safe] list.
-# TODO: path could be a list of paths...? But then how can we tell it's not a list of queries..
+# TODO: path could be a list of paths...? But then how can we tell
+# it's not a list of queries..
 
 
 class Queries:
-    def __init__(self, path=None, data=None):
+    def __init__(
+        self, path=None, data=None, sparse_path: Optional[Path] = None
+    ):
         self.path = path
+        self.sparse_path = sparse_path
 
         if data:
             assert isinstance(data, dict), type(data)
         self._load_data(data) or self._load_file(path)
-    
+        if self.sparse_path is None:
+            return
+
+        self._load_sparse_queries()
+
+
     def __len__(self):
         return len(self.data)
 
@@ -24,9 +39,9 @@ class Queries:
 
     def provenance(self):
         return self.path
-    
+
     def toDict(self):
-        return {'provenance': self.provenance()}
+        return {"provenance": self.provenance()}
 
     def _load_data(self, data):
         if data is None:
@@ -37,7 +52,7 @@ class Queries:
 
         for qid, content in data.items():
             if isinstance(content, dict):
-                self.data[qid] = content['question']
+                self.data[qid] = content["question"]
                 self._qas[qid] = content
             else:
                 self.data[qid] = content
@@ -48,10 +63,10 @@ class Queries:
         return True
 
     def _load_file(self, path):
-        if not path.endswith('.json'):
+        if not path.endswith(".json"):
             self.data = load_queries(path)
             return True
-        
+
         # Load QAs
         self.data = {}
         self._qas = {}
@@ -60,11 +75,28 @@ class Queries:
             for line in f:
                 qa = ujson.loads(line)
 
-                assert qa['qid'] not in self.data
-                self.data[qa['qid']] = qa['question']
-                self._qas[qa['qid']] = qa
+                assert qa["qid"] not in self.data
+                self.data[qa["qid"]] = qa["question"]
+                self._qas[qa["qid"]] = qa
 
         return self.data
+
+    def _load_sparse_queries(self):
+        with self.sparse_path.open() as sqfs:
+            sparse_lines = sqfs.readline()
+
+        self.sparse_queries = dict()
+        for line in sparse_lines:
+            qid, q_repeated = line.rstrip().split(":", maxsplit=1)
+            q_repeated = q_repeated.strip()
+            term_counts = defaultdict(int)
+            for term in q_repeated.split():
+                term_counts[term] += 1
+
+            self.sparse_queries[qid] = term_counts
+
+    def sparse_query(self, qid: str) -> Optional[SparseQuery]:
+        return self.sparse_queries.get(qid)
 
     def qas(self):
         return dict(self._qas)
@@ -82,24 +114,24 @@ class Queries:
         return self.data.items()
 
     def save(self, new_path):
-        assert new_path.endswith('.tsv')
+        assert new_path.endswith(".tsv")
         assert not os.path.exists(new_path), new_path
 
-        with Run().open(new_path, 'w') as f:
+        with Run().open(new_path, "w") as f:
             for qid, content in self.data.items():
-                content = f'{qid}\t{content}\n'
+                content = f"{qid}\t{content}\n"
                 f.write(content)
-            
+
             return f.name
 
     def save_qas(self, new_path):
-        assert new_path.endswith('.json')
+        assert new_path.endswith(".json")
         assert not os.path.exists(new_path), new_path
 
-        with open(new_path, 'w') as f:
+        with open(new_path, "w") as f:
             for qid, qa in self._qas.items():
-                qa['qid'] = qid
-                f.write(ujson.dumps(qa) + '\n')
+                qa["qid"] = qid
+                f.write(ujson.dumps(qa) + "\n")
 
     def _load_tsv(self, path):
         raise NotImplementedError
@@ -118,7 +150,9 @@ class Queries:
         if type(obj) is cls:
             return obj
 
-        assert False, f"obj has type {type(obj)} which is not compatible with cast()"
+        assert (
+            False
+        ), f"obj has type {type(obj)} which is not compatible with cast()"
 
 
 # class QuerySet:
