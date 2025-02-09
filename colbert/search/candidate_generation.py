@@ -37,7 +37,7 @@ class CandidateGeneration:
             alpha=self.sparcent_alpha,
             beta=self.sparcent_beta,
         )[0]
-        cells = torch.IntTensor(list(map(int, cells)))
+        cells = torch.LongTensor(list(map(int, cells)))
         if self.use_gpu:
             cells = cells.to("cuda")
 
