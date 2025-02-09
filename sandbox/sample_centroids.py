@@ -149,4 +149,9 @@ if __name__ == "__main__":
                     )
                 )
 
-        torch.save(cid_pids, osp.join(index_path, args.out_filename))
+        torch.save(
+            torch.nn.utils.rnn.pad_sequence(
+                cid_pids, batch_first=True, padding_value=-1.0
+            ),
+            osp.join(index_path, args.out_filename),
+        )
