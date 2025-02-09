@@ -138,7 +138,7 @@ class Searcher:
                         Q[query_idx : query_idx + 1],
                         k=k,
                         filter_fn=filter_fn,
-                        qid=qids[query_idx],
+                        sparse_query=queries.sparse_query(qids[query_idx])
                     )
 
                 times[query_idx][run] = (time.time() - search_start) * 1000

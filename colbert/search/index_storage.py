@@ -41,7 +41,7 @@ class IndexScorer(IndexLoader, CandidateGeneration):
         if self.filter_pids_maxscore:
             self.get_cells_func = self.get_cells_term_ub_scores
             self.__class__.filter_pids_file = "filter_pids_maxscore.cpp"
-        elif config.sparcent_path is not None:
+        elif config.sparcent_index is not None:
             if (
                 config.sparcent_k_score is None
                 or config.sparcent_k_rerank is None
@@ -50,7 +50,7 @@ class IndexScorer(IndexLoader, CandidateGeneration):
             ):
                 raise ValueError("invalid sparcent index parameters")
 
-            self.sparcent_index = bmp.Searcher(config.sparcent_path)
+            self.sparcent_index = bmp.Searcher(config.sparcent_index)
             self.sparcent_k_score = config.sparcent_k_score
             self.sparcent_k_rerank = config.sparcent_k_rerank
             self.sparcent_alpha = config.sparcent_alpha

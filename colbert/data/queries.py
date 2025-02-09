@@ -1,7 +1,7 @@
-from collections import defaultdict
 import os
+from collections import defaultdict
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Dict, Optional
 
 import ujson
 
@@ -29,7 +29,6 @@ class Queries:
             return
 
         self._load_sparse_queries()
-
 
     def __len__(self):
         return len(self.data)
@@ -83,11 +82,12 @@ class Queries:
 
     def _load_sparse_queries(self):
         with self.sparse_path.open() as sqfs:
-            sparse_lines = sqfs.readline()
+            sparse_lines = sqfs.readlines()
 
         self.sparse_queries = dict()
         for line in sparse_lines:
             qid, q_repeated = line.rstrip().split(":", maxsplit=1)
+            qid = int(qid)
             q_repeated = q_repeated.strip()
             term_counts = defaultdict(int)
             for term in q_repeated.split():
