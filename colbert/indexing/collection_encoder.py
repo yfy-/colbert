@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 from typing import List, Tuple
 
-import jgrapht
 import numpy as np
 import torch
 from torch.utils.cpp_extension import load

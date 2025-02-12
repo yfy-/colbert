@@ -13,7 +13,7 @@ dependencies:
   - torchvision=0.14.1
   - cudatoolkit=11.3
   # Dev is required for nvcc etc.
-  - cudatoolkit-dev
+  # - cudatoolkit-dev
   - gcc=9.4.0
   - gxx=9.4.0
   - pip:
@@ -24,9 +24,8 @@ dependencies:
     - jupyterlab
     - ninja
     - scipy
-    - spacy
     - tqdm
-    - transformers==4.38.2
+    - transformers
     - ujson
     - flask
     - python-dotenv

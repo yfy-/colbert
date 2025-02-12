@@ -31,13 +31,15 @@ class CandidateGeneration:
         if sparse_query is None:
             raise ValueError("sparse query cannot be null.")
 
-        cells = self.sparcent_index.search_quantized(
-            sparse_query,
-            k=self.sparcent_k_score,
-            alpha=self.sparcent_alpha,
-            beta=self.sparcent_beta,
-        )[0]
-        cells = torch.LongTensor(list(map(int, cells)))
+        cells = torch.from_numpy(
+            self.sparcent_index.search_ndarray(
+                sparse_query,
+                k=self.sparcent_k_score,
+                alpha=self.sparcent_alpha,
+                beta=self.sparcent_beta,
+            )
+        )
+        # cells = torch.LongTensor(list(map(int, cells)))
         if self.use_gpu:
             cells = cells.to("cuda")
 
