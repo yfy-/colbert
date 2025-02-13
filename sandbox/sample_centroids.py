@@ -31,7 +31,7 @@ def sort_count(
             if curr_code.item() == centroid_idx:
                 counts[i] += 1
 
-    return torch.argsort(counts, descending=True)
+    return pids[torch.argsort(counts, descending=True)]
 
 
 def sort_similar(
@@ -80,11 +80,34 @@ def sort_similar(
     return psgs_sorted
 
 
+def sort_mean_similar(
+    pids_centroid_idx: Tuple[torch.Tensor, int],
+    device: str,
+    centroids: torch.Tensor,
+) -> torch.Tensor:
+    """Sort pids by their mean similarity to the centroid."""
+    pids, centroid_idx = pids_centroid_idx
+    pids_embs, pids_lengths = embs_strided.lookup_pids(pids)
+    pids_embs = pids_embs.to(device)
+    pids_lengths = pids_lengths.to(device)
+    emb_scores = (
+        centroids[centroid_idx : centroid_idx + 1, :] @ pids_embs.T
+    ).squeeze(0)
+    pids_lengths_cumsum = torch.cumsum(pids_lengths, dim=0)
+    max_pids_all = torch.searchsorted(
+        pids_lengths_cumsum, torch.arange(len(emb_scores), device=device)
+    ).to("cpu")
+    emb_scores = emb_scores.to("cpu").double()
+    scores = torch.zeros(len(pids), dtype=torch.float64, device="cpu")
+    scores.index_add_(0, max_pids_all, emb_scores)
+    return pids[torch.argsort(scores / pids_lengths.to("cpu"), descending=True)]
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "order_method",
-        choices=["similar", "count"],
+        choices=["similar", "count", "mean_similar"],
         help="Method to output passages in order.",
     )
     parser.add_argument("out_filename", help="Out tensor file name")
@@ -122,6 +145,10 @@ if __name__ == "__main__":
                 doclens=loader.doclens,
                 codes=embs_strided.codes,
                 code_offsets=embs_strided.codes_strided.offsets,
+            )
+        elif args.order_method == "mean_similar":
+            sort_partial = partial(
+                sort_mean_similar, device=device, centroids=centroids
             )
         else:
             raise ValueError(f"no such method: {args.order_method}")
