@@ -154,6 +154,7 @@ class Searcher:
         provenance.queries = queries.provenance()
         provenance.config = self.config.export()
         provenance.k = k
+        provenance.mean_centroid_latency = avg_cent_match
         provenance.mean_latency = torch.mean(pivot_times).item()
         provenance.median_latency = torch.median(pivot_times).item()
         tail_lat = torch.quantile(
