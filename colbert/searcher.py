@@ -272,7 +272,7 @@ class Searcher:
 
     def sparse_then_dense_search(self, Q: torch.Tensor, sq: SparseQuery, k=10):
         pids = torch.from_numpy(
-            self.sparcent_index.search_ndarray(
+            self.ranker.sparcent_index.search_ndarray(
                 sq,
                 k=k,
                 alpha=self.sparcent_alpha,
