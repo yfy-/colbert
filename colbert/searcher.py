@@ -96,7 +96,7 @@ class Searcher:
         filter_fn=None,
         full_length_search=False,
         num_run=2,
-        prec_pids: Optional[torch.Tensor] = None,
+        sparse_then_dense=False,
     ):
         queries = Queries.cast(queries)
         queries_ = list(queries.values())
@@ -104,7 +104,12 @@ class Searcher:
         Q = self.encode(queries_, full_length_search=full_length_search)
 
         return self._search_all_Q_timed(
-            queries, Q, k, num_run, filter_fn=filter_fn, prec_pids=prec_pids
+            queries,
+            Q,
+            k,
+            num_run,
+            filter_fn=filter_fn,
+            sparse_then_dense=sparse_then_dense,
         )
 
     def _search_all_Q_timed(
@@ -114,7 +119,7 @@ class Searcher:
         k,
         num_run,
         filter_fn=None,
-        prec_pids: Optional[torch.Tensor] = None,
+        sparse_then_dense=False,
     ):
         qids = list(queries.keys())
         num_q = Q.size(0)
@@ -122,14 +127,17 @@ class Searcher:
         all_scored_pids = []
         for run in tqdm(range(num_run), desc="Run loop"):
             for query_idx in tqdm(range(num_q), desc="Query loop"):
-                if prec_pids is not None:
-                    q_prec_pids = prec_pids[qids[query_idx]].type(torch.int32)[
-                        :k
-                    ]
+                sparse_q = queries.sparse_query(qids[query_idx])
+                if sparse_then_dense:
+                    if sparse_q is None:
+                        raise ValueError(
+                            "no sparse query for sparse then dense."
+                        )
+
                     search_start = time.time()
-                    pids, ranks, scores = self.dense_precomputed_search(
+                    pids, ranks, scores = self.sparse_then_dense_search(
                         Q[query_idx : query_idx + 1],
-                        q_prec_pids,
+                        sparse_q,
                         k=k,
                     )
                 else:
@@ -138,7 +146,7 @@ class Searcher:
                         Q[query_idx : query_idx + 1],
                         k=k,
                         filter_fn=filter_fn,
-                        sparse_query=queries.sparse_query(qids[query_idx])
+                        sparse_query=sparse_q,
                     )
 
                 times[query_idx][run] = (time.time() - search_start) * 1000
@@ -262,6 +270,14 @@ class Searcher:
 
         return pids[:k], list(range(1, k + 1)), scores[:k]
 
-    def dense_precomputed_search(self, Q: torch.Tensor, pids, k=10):
+    def sparse_then_dense_search(self, Q: torch.Tensor, sq: SparseQuery, k=10):
+        pids = torch.from_numpy(
+            self.sparcent_index.search_ndarray(
+                sq,
+                k=k,
+                alpha=self.sparcent_alpha,
+                beta=self.sparcent_beta,
+            )
+        )
         pids, scores = self.ranker.rank_precomputed(self.config, Q, pids)
         return pids[:k], list(range(1, k + 1)), scores[:k]
