@@ -275,8 +275,8 @@ class Searcher:
             self.ranker.sparcent_index.search_ndarray(
                 sq,
                 k=k,
-                alpha=self.sparcent_alpha,
-                beta=self.sparcent_beta,
+                alpha=self.ranker.sparcent_alpha,
+                beta=self.ranker.sparcent_beta,
             )
         )
         pids, scores = self.ranker.rank_precomputed(self.config, Q, pids)
