@@ -278,6 +278,6 @@ class Searcher:
                 alpha=self.ranker.sparcent_alpha,
                 beta=self.ranker.sparcent_beta,
             )
-        )
+        ).int()
         pids, scores = self.ranker.rank_precomputed(self.config, Q, pids)
         return pids[:k], list(range(1, k + 1)), scores[:k]
