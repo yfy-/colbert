@@ -21,6 +21,7 @@ class Queries:
     ):
         self.path = path
         self.sparse_path = sparse_path
+        self.sparse_queries = dict()
 
         if data:
             assert isinstance(data, dict), type(data)
@@ -84,7 +85,6 @@ class Queries:
         with self.sparse_path.open() as sqfs:
             sparse_lines = sqfs.readlines()
 
-        self.sparse_queries = dict()
         for line in sparse_lines:
             qid, q_repeated = line.rstrip().split(":", maxsplit=1)
             qid = int(qid)
