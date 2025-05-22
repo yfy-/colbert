@@ -34,6 +34,31 @@ def sort_count(
     return pids[torch.argsort(counts, descending=True)]
 
 
+def sort_count_vectorized(
+    pids_centroid_idx: Tuple[torch.Tensor, int],
+    doclens: torch.Tensor,
+    codes: torch.Tensor,
+    code_offsets: torch.Tensor,
+) -> torch.Tensor:
+    pids, centroid_idx = pids_centroid_idx
+    pids = pids.long()
+
+    pids_doclens = doclens[pids]
+
+    pids_len_repeat = pids.repeat_interleave(pids_doclens)
+    code_offsets_embs = code_offsets[pids_len_repeat]
+    doclens_offsets = torch.cat([torch.arange(dl) for dl in pids_doclens])
+    code_offsets_embs += doclens_offsets
+
+    emb_code_mask = codes[code_offsets_embs] == centroid_idx
+
+    counts = torch.bincount(
+        torch.arange(len(pids)).repeat_interleave(pids_doclens),
+        weights=emb_code_mask.long(),
+    )
+    return pids.int()[torch.argsort(counts, descending=True)]
+
+
 def sort_similar(
     pids_centroid_idx: Tuple[torch.Tensor, int],
     device: str,
@@ -105,6 +130,8 @@ def sort_mean_similar(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("experiment")
+    parser.add_argument("index")
     parser.add_argument(
         "order_method",
         choices=["similar", "count", "mean_similar"],
@@ -122,9 +149,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
     device = args.device
     with Run().context(RunConfig(nranks=1)):
-        config = ColBERTConfig(experiment="msmarco")
+        config = ColBERTConfig(experiment=args.experiment)
         index_path = osp.join(
-            config.root, config.experiment, "indexes", "msmarco.nbits=2"
+            config.root, config.experiment, "indexes", args.index
         )
         loader = IndexLoader(index_path)
         all_pids = loader.ivf.tensor.to(device)
@@ -141,7 +168,7 @@ if __name__ == "__main__":
             )
         elif args.order_method == "count":
             sort_partial = partial(
-                sort_count,
+                sort_count_vectorized,
                 doclens=loader.doclens,
                 codes=embs_strided.codes,
                 code_offsets=embs_strided.codes_strided.offsets,
