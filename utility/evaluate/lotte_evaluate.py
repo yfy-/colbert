@@ -41,7 +41,7 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParse()
+    parser = argparse.ArgumentParser()
     parser.add_argument("rel_judges")
     parser.add_argument("rankings")
     parser.add_argument("--k", type=int, default=5)
