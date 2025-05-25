@@ -1,8 +1,7 @@
 import argparse
 import sys
 from collections import defaultdict
-
-import jsonlines
+import json
 
 from colbert.utils.utils import file_tqdm, print_message
 
@@ -22,9 +21,11 @@ def main(args):
 
     num_total_qids = 0
     success = 0
-    with jsonlines.open(args.rel_judges, mode="r") as f:
-        for line in f:
-            qid = int(line["qid"])
+    with open(args.rel_judges) as rjfs:
+        for jline in rjfs:
+            rjson = json.loads(jline.rstrip())
+            qid = rjson["qid"]
+            answer_pids = rjson["answer_pids"]
             num_total_qids += 1
             if qid not in qid2pids:
                 print(
@@ -32,7 +33,7 @@ def main(args):
                     file=sys.stderr,
                 )
                 continue
-            answer_pids = set(line["answer_pids"])
+            answer_pids = set(answer_pids)
             if len(set(qid2pids[qid][: args.k]).intersection(answer_pids)) > 0:
                 success += 1
 
