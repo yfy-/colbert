@@ -9,7 +9,7 @@ from colbert.utils.utils import file_tqdm, print_message
 def main(args):
     qid2pids = defaultdict(list)
     with open(args.rankings) as f:
-        print_message(f"#> Loading ranked lists from {args.ranking} ..")
+        print_message(f"#> Loading ranked lists from {args.rankings} ..")
         for line in file_tqdm(f):
             if args.trec:
                 qid, _, pid, _, _, _ = line.strip().split()
