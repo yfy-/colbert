@@ -6,6 +6,7 @@ import os
 import math
 import tqdm
 import ujson
+import json
 import random
 
 from argparse import ArgumentParser
@@ -13,14 +14,9 @@ from collections import defaultdict
 from colbert.utils.utils import print_message, file_tqdm
 
 
-def main(args):
+def tsv_qrel(qrel_path: str):
     qid2positives = defaultdict(list)
-    qid2ranking = defaultdict(list)
-    qid2mrr = {}
-    qid2recall = {depth: {} for depth in [50, 200, 1000, 5000, 10000]}
-
-    with open(args.qrels) as f:
-        print_message(f"#> Loading QRELs from {args.qrels} ..")
+    with open(qrel_path) as f:
         for line in file_tqdm(f):
             qid, _, pid, label = line.strip().split()
             qid = int(qid)
@@ -29,6 +25,26 @@ def main(args):
             if label > 0:
                 qid2positives[qid].append(pid)
 
+    return qid2positives
+
+
+def json_qrel(qrel_path: str):
+    qid2positives = defaultdict(list)
+    with open(qrel_path) as f:
+        for jline in rjfs:
+            rjson = json.loads(jline.rstrip())
+            qid2positives[rjson["qid"]] += rjson["answer_pids"]
+
+    return qid2positives
+
+
+def main(args):
+    qid2ranking = defaultdict(list)
+    qid2mrr = {}
+    qid2recall = {depth: {} for depth in [50, 200, 1000, 5000, 10000]}
+
+    print_message(f"#> Loading QRELs from {args.qrels} ..")
+    qid2_positives =
     with open(args.ranking) as f:
         print_message(f"#> Loading ranked lists from {args.ranking} ..")
         for line in file_tqdm(f):
@@ -122,6 +138,7 @@ if __name__ == "__main__":
     parser.add_argument('--ranking', dest='ranking', required=True, type=str)
     parser.add_argument('--annotate', dest='annotate', default=False, action='store_true')
     parser.add_argument("--trec", default=False, action="store_true")
+    parser.add_argument("--qrel-json")
 
     args = parser.parse_args()
 
