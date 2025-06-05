@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import itertools
 import os
 from pathlib import Path
@@ -8,9 +9,8 @@ import numpy as np
 import torch
 from torch.utils.cpp_extension import load
 
-
 from colbert.infra.run import Run
-from colbert.utils.utils import print_message, batch
+from colbert.utils.utils import batch, print_message
 
 
 class CollectionEncoder:
@@ -26,6 +26,7 @@ class CollectionEncoder:
             "att_bottom": self.att_bottom_keep,
             "first": self.first_keep,
             "att_greedy_mvc": self.att_greedy_mvc,
+            "most_dominant": self.most_dominant,
         }
 
         self.static_prune_func = None
@@ -36,6 +37,20 @@ class CollectionEncoder:
                 raise ValueError(f"No such static pruning method: '{sm}'")
 
             self.static_prune_func = self.static_prune_funcs[sm]
+            if self.config.static_pruning_method == "most_dominant":
+                self.checkpoint.query_tokenizer.query_maxlen = (
+                    self.config.query_maxlen
+                )
+
+                # Replace 'queries' arg with tensor queries.
+                queries = self.config.static_pruning_kwargs["queries"]
+                bsize = 128 if len(queries) > 128 else None
+                print_message("Encoding queries for 'most_dominant'")
+                Q = self.checkpoint.queryFromText(
+                    queries, bsize=bsize, to_cpu=True, full_length_search=True
+                )
+                Q = Q.view(Q.shape[0] * Q.shape[1], Q.shape[2])
+                self.config.static_pruning_kwargs["queries"] = Q
 
         self.cache_path = None
         if self.config.encode_cache_path is not None:
@@ -128,55 +143,19 @@ class CollectionEncoder:
 
         return embs[keep_mask]
 
-        # def att_greedy_mvc(
-        #     self, embs: torch.Tensor, edge_threshold=0.8
-        # ) -> torch.Tensor:
-        #     adj = (embs @ embs.T) >= edge_threshold
-        #     adj[torch.eye(len(adj), dtype=torch.bool)] = False
-
-        #     # Disconnect [CLS] and [D] tokens.
-        #     adj[:2, :] = False
-        #     adj[:, :2] = False
-
-        #     # Always keep disconnected vertices.
-        #     keep_mask = torch.zeros(len(embs), dtype=torch.bool)
-        #     keep_mask[torch.sum(adj, dim=1) == 0] = True
-
-        #     doclen = len(adj)
-        #     graph = jgrapht.create_graph(directed=False, weighted=False)
-        #     graph.add_vertices_from(range(doclen))
-        #     for i in range(doclen):
-        #         for j in range(i + 1, doclen):
-        #             if adj[i][j].item():
-        #                 graph.add_edge(i, j)
-
-        #     _, vertex_set = jgrapht.algorithms.vertexcover.greedy(graph)
-        #     keep_mask[list(vertex_set)] = True
-
-        # mvc_cand = torch.zeros_like(adj, dtype=torch.bool)
-        # emb_ids = range(doclen)
-        # found = False
-        # print_message(f"Solving MVC for size={doclen}")
-        # for mvc_len in range(1, doclen + 1):
-        #     print_message(f"Trying with size={mvc_len}")
-        #     for idx_s in itertools.combinations(emb_ids, mvc_len):
-        #         mvc_cand[idx_s, :] = adj[idx_s, :]
-        #         mvc_cand[:, idx_s] = adj[:, idx_s]
-        #         if (mvc_cand == adj).all():
-        #             found = True
-        #             print_message(f"MVC found with size={len(idx_s)}")
-        #             keep_mask[idx_s] = True
-        #             break
-        #         else:
-        #             mvc_cand.zero_()
-
-        #     if found:
-        #         break
-
-        # if not found:
-        #     raise ValueError("could not find MVC!")
-
-        # return embs[keep_mask]
+    def most_dominant(
+        self,
+        embs: torch.Tensor,
+        queries: torch.Tensor,
+        dominance_ratio=0.1,
+    ) -> torch.Tensor:
+        # Q x N
+        scores = queries @ embs.T
+        max_emb_args = torch.argmax(scores, dim=1)
+        counts = torch.bincount(max_emb_args)
+        ratios = counts / queries.shape[0]
+        keep_mask = ratios >= dominance_ratio
+        return embs[keep_mask]
 
     def static_prune(
         self, embs: torch.Tensor, doclens: List[int], **prune_kwargs
