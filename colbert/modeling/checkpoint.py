@@ -47,7 +47,7 @@ class Checkpoint(ColBERT):
             return torch.cat(batches)
 
         input_ids, attention_mask = self.query_tokenizer.tensorize(queries, context=context, full_length_search=full_length_search)
-        return self.query(input_ids, attention_mask)
+        return self.query(input_ids, attention_mask, to_cpu=to_cpu)
 
     def docFromText(self, docs, bsize=None, keep_dims=True, to_cpu=False, showprogress=False, return_tokens=False):
         assert keep_dims in [True, False, 'flatten']

@@ -9,6 +9,7 @@ import numpy as np
 import torch
 from torch.utils.cpp_extension import load
 
+from colbert.data import Queries
 from colbert.infra.run import Run
 from colbert.utils.utils import batch, print_message
 
@@ -37,20 +38,28 @@ class CollectionEncoder:
                 raise ValueError(f"No such static pruning method: '{sm}'")
 
             self.static_prune_func = self.static_prune_funcs[sm]
+            self.static_pruning_kwargs = dict(self.config.static_pruning_kwargs)
             if self.config.static_pruning_method == "most_dominant":
                 self.checkpoint.query_tokenizer.query_maxlen = (
                     self.config.query_maxlen
                 )
 
-                # Replace 'queries' arg with tensor queries.
-                queries = self.config.static_pruning_kwargs["queries"]
+                queries = list(
+                    Queries(self.static_pruning_kwargs["queries"]).values()
+                )
                 bsize = 128 if len(queries) > 128 else None
                 print_message("Encoding queries for 'most_dominant'")
                 Q = self.checkpoint.queryFromText(
-                    queries, bsize=bsize, to_cpu=True, full_length_search=True
+                    queries,
+                    bsize=bsize,
+                    to_cpu=not self.use_gpu,
+                    full_length_search=False,
                 )
                 Q = Q.view(Q.shape[0] * Q.shape[1], Q.shape[2])
-                self.config.static_pruning_kwargs["queries"] = Q
+                if self.use_gpu:
+                    Q = Q.half()
+
+                self.static_pruning_kwargs["queries"] = Q
 
         self.cache_path = None
         if self.config.encode_cache_path is not None:
@@ -147,14 +156,14 @@ class CollectionEncoder:
         self,
         embs: torch.Tensor,
         queries: torch.Tensor,
-        dominance_ratio=0.1,
+        dominance_ratio=0.01,
     ) -> torch.Tensor:
         # Q x N
         scores = queries @ embs.T
         max_emb_args = torch.argmax(scores, dim=1)
-        counts = torch.bincount(max_emb_args)
-        ratios = counts / queries.shape[0]
-        keep_mask = ratios >= dominance_ratio
+        counts = torch.bincount(max_emb_args, minlength=embs.shape[0])
+        probs = counts / queries.shape[0]
+        keep_mask = probs >= dominance_ratio
         return embs[keep_mask]
 
     def static_prune(
@@ -229,7 +238,7 @@ class CollectionEncoder:
                 f"method '{self.config.static_pruning_method}'."
             )
             return self.static_prune(
-                embs, doclens, **self.config.static_pruning_kwargs
+                embs, doclens, **self.static_pruning_kwargs
             )
 
         return embs, doclens

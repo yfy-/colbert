@@ -1,5 +1,6 @@
 import os
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -153,7 +154,6 @@ class Queries:
         assert (
             False
         ), f"obj has type {type(obj)} which is not compatible with cast()"
-
 
 # class QuerySet:
 #     def __init__(self, *paths, renumber=False):
