@@ -28,6 +28,7 @@ class CollectionEncoder:
             "first": self.first_keep,
             "att_greedy_mvc": self.att_greedy_mvc,
             "most_dominant": self.most_dominant,
+            "most_dominant_repair": self.most_dominant_repair,
         }
 
         self.static_prune_func = None
@@ -39,7 +40,7 @@ class CollectionEncoder:
 
             self.static_prune_func = self.static_prune_funcs[sm]
             self.static_pruning_kwargs = dict(self.config.static_pruning_kwargs)
-            if self.config.static_pruning_method == "most_dominant":
+            if self.config.static_pruning_method.startswith("most_dominant"):
                 self.checkpoint.query_tokenizer.query_maxlen = (
                     self.config.query_maxlen
                 )
@@ -152,19 +153,71 @@ class CollectionEncoder:
 
         return embs[keep_mask]
 
-    def most_dominant(
-        self,
-        embs: torch.Tensor,
-        queries: torch.Tensor,
-        dominance_ratio=0.01,
+    @classmethod
+    def _arg_most_dominant(
+        cls, embs: torch.Tensor, queries: torch.Tensor, dominance_ratio=0.01
     ) -> torch.Tensor:
         # Q x N
         scores = queries @ embs.T
         max_emb_args = torch.argmax(scores, dim=1)
         counts = torch.bincount(max_emb_args, minlength=embs.shape[0])
         probs = counts / queries.shape[0]
-        keep_mask = probs >= dominance_ratio
-        return embs[keep_mask]
+        return probs >= dominance_ratio
+
+    @classmethod
+    def most_dominant(
+        cls,
+        embs: torch.Tensor,
+        queries: torch.Tensor,
+        dominance_ratio=0.01,
+    ) -> torch.Tensor:
+        return embs[
+            cls._arg_most_dominant(
+                embs, queries, dominance_ratio=dominance_ratio
+            )
+        ]
+
+    @classmethod
+    def most_dominant_repair(
+        cls,
+        embs: torch.Tensor,
+        queries: torch.Tensor,
+        dominance_ratio=0.01,
+        iters=3,
+        num_neighbors=5,
+        step_size=0.25,
+    ) -> torch.Tensor:
+        keep_mask = cls._arg_most_dominant(
+            embs, queries, dominance_ratio=dominance_ratio
+        )
+        if keep_mask.all():
+            return embs
+
+        kept_embs = embs[keep_mask]
+        rm_embs = embs[~keep_mask]
+        nbr_scores = rm_embs @ kept_embs.T
+        _, nbrs = torch.topk(
+            nbr_scores, min(num_neighbors, len(kept_embs)), dim=1, sorted=False
+        )
+        nbrs = torch.unique(nbrs, sorted=False)
+        for _ in range(iters):
+            for nbr in nbrs:
+                q_codes = torch.argmax(queries @ kept_embs.T, dim=1)
+                code_mask = q_codes == nbr
+                if not code_mask.any():
+                    continue
+
+                nbr_sph_mean = torch.nn.functional.normalize(
+                    torch.sum(queries[code_mask, :], dim=0), dim=0
+                )
+                kept_embs[nbr] = (1 - step_size) * kept_embs[
+                    nbr
+                ] + step_size * nbr_sph_mean
+                kept_embs[nbr] = torch.nn.functional.normalize(
+                    kept_embs[nbr], dim=0
+                )
+
+        return kept_embs
 
     def static_prune(
         self, embs: torch.Tensor, doclens: List[int], **prune_kwargs
