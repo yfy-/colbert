@@ -1,4 +1,6 @@
 import os
+import cProfile
+import pstats
 import tqdm
 import time
 import ujson
@@ -411,6 +413,8 @@ class CollectionIndexer:
             {CHUNK#}.residuals.pt:  16-bits residual for each embedding in chunk
             doclens.{CHUNK#}.pt:    number of embeddings within each passage in chunk
         """
+        # profiler = cProfile.Profile()
+        # profiler.enable()
         with self.saver.thread():
             batches = self.collection.enumerate_batches(rank=self.rank)
             for chunk_idx, offset, passages in tqdm.tqdm(
@@ -443,6 +447,9 @@ class CollectionIndexer:
                     chunk_idx, offset, embs, doclens
                 )  # offset = first passage index in chunk
                 del embs, doclens
+
+        # profiler.disable()
+        # profiler.dump_stats("index_vec_nn2.prof")
 
     def finalize(self):
         """

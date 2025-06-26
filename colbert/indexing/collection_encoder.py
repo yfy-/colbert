@@ -7,6 +7,7 @@ from typing import List, Tuple
 
 import numpy as np
 import torch
+import torch.nn.functional as torch_f
 from torch.utils.cpp_extension import load
 
 from colbert.data import Queries
@@ -197,25 +198,34 @@ class CollectionEncoder:
         rm_embs = embs[~keep_mask]
         nbr_scores = rm_embs @ kept_embs.T
         _, nbrs = torch.topk(
-            nbr_scores, min(num_neighbors, len(kept_embs)), dim=1, sorted=False
+            nbr_scores,
+            min(num_neighbors, kept_embs.size(0)),
+            dim=1,
+            sorted=False,
         )
         nbrs = torch.unique(nbrs, sorted=False)
         for _ in range(iters):
-            for nbr in nbrs:
-                q_codes = torch.argmax(queries @ kept_embs.T, dim=1)
-                code_mask = q_codes == nbr
-                if not code_mask.any():
-                    continue
+            # Q
+            q_codes = torch.argmax(queries @ kept_embs.T, dim=1)
 
-                nbr_sph_mean = torch.nn.functional.normalize(
-                    torch.sum(queries[code_mask, :], dim=0), dim=0
-                )
-                kept_embs[nbr] = (1 - step_size) * kept_embs[
-                    nbr
-                ] + step_size * nbr_sph_mean
-                kept_embs[nbr] = torch.nn.functional.normalize(
-                    kept_embs[nbr], dim=0
-                )
+            # Q x N
+            q_codes = torch_f.one_hot(q_codes, num_classes=kept_embs.size(0))[
+                :, nbrs
+            ].to(queries.dtype)
+
+            # N x d
+            code_sums = q_codes.T @ queries
+
+            # Only keep nbrs that are assigned at least 1 query.
+            nbr_mask = torch.sum(q_codes, dim=0) > 0
+
+            kept_embs[nbrs[nbr_mask]] = (
+                kept_embs[nbrs[nbr_mask]] * (1 - step_size)
+                + torch_f.normalize(code_sums[nbr_mask], dim=1) * step_size
+            )
+            torch_f.normalize(
+                kept_embs[nbrs[nbr_mask]], dim=1, out=kept_embs[nbrs[nbr_mask]]
+            )
 
         return kept_embs
 
