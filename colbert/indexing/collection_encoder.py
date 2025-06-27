@@ -219,12 +219,11 @@ class CollectionEncoder:
             # Only keep nbrs that are assigned at least 1 query.
             nbr_mask = torch.sum(q_codes, dim=0) > 0
 
-            kept_embs[nbrs[nbr_mask]] = (
+            # Move in the direction of spherical mean by stepsize.
+            kept_embs[nbrs[nbr_mask]] = torch_f.normalize(
                 kept_embs[nbrs[nbr_mask]] * (1 - step_size)
-                + torch_f.normalize(code_sums[nbr_mask], dim=1) * step_size
-            )
-            torch_f.normalize(
-                kept_embs[nbrs[nbr_mask]], dim=1, out=kept_embs[nbrs[nbr_mask]]
+                + torch_f.normalize(code_sums[nbr_mask], dim=1) * step_size,
+                dim=1,
             )
 
         return kept_embs
