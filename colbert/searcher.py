@@ -2,6 +2,7 @@ import json
 import os
 import time
 from typing import Optional, Union
+from pathlib import Path
 
 import torch
 from tqdm import tqdm
@@ -97,11 +98,24 @@ class Searcher:
         full_length_search=False,
         num_run=2,
         sparse_then_dense=False,
+        query_cache_path: Optional[Path] = None,
     ):
         queries = Queries.cast(queries)
         queries_ = list(queries.values())
 
-        Q = self.encode(queries_, full_length_search=full_length_search)
+        Q = None
+        qcp_exist = query_cache_path.exists()
+        if query_cache_path is not None and qcp_exist:
+            print_message(f"Loading cached Q from: {query_cache_path}")
+            Q = torch.load(query_cache_path)
+
+        if Q is None:
+            print_message("Encoding queries..")
+            Q = self.encode(queries_, full_length_search=full_length_search)
+
+        if query_cache_path is not None and not qcp_exist:
+            print_message(f"Caching Q to cache file at: {query_cache_path}")
+            torch.save(Q, query_cache_path)
 
         return self._search_all_Q_timed(
             queries,
