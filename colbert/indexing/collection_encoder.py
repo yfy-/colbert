@@ -24,12 +24,13 @@ class CollectionEncoder:
         # self.try_load_torch_extensions(self.config.static_pruning_method)
 
         self.static_prune_funcs = {
-            "att_top": self.att_top_keep,
-            "att_bottom": self.att_bottom_keep,
-            "first": self.first_keep,
-            "att_greedy_mvc": self.att_greedy_mvc,
-            "most_dominant": self.most_dominant,
-            "most_dominant_repair": self.most_dominant_repair,
+            "attention": self.attention_pruning,
+            "dissimilar": self.dissimilar_pruning,
+            "dominant": self.dominant_pruning,
+            "dominant_repair": self.dominant_repair_pruning,
+            "first": self.first_pruning,
+            "gdmis": self.gdmis_pruning,
+            "similar": self.similar_pruning,
         }
 
         self.static_prune_func = None
@@ -41,7 +42,7 @@ class CollectionEncoder:
 
             self.static_prune_func = self.static_prune_funcs[sm]
             self.static_pruning_kwargs = dict(self.config.static_pruning_kwargs)
-            if self.config.static_pruning_method.startswith("most_dominant"):
+            if self.config.static_pruning_method.startswith("dominant"):
                 self.checkpoint.query_tokenizer.query_maxlen = (
                     self.config.query_maxlen
                 )
@@ -50,7 +51,7 @@ class CollectionEncoder:
                     Queries(self.static_pruning_kwargs["queries"]).values()
                 )
                 bsize = 128 if len(queries) > 128 else None
-                print_message("Encoding queries for 'most_dominant'")
+                print_message("Encoding queries for 'dominant'")
                 Q = self.checkpoint.queryFromText(
                     queries,
                     bsize=bsize,
@@ -67,44 +68,34 @@ class CollectionEncoder:
         if self.config.encode_cache_path is not None:
             self.cache_path = Path(self.config.encode_cache_path)
 
-    @classmethod
-    def try_load_torch_extensions(cls, prune_method: str):
-        if (
-            hasattr(cls, "loaded_extensions")
-            or prune_method != "att_exhaustive_mvc"
-        ):
-            return
-
-        print_message(
-            "Loading att_exhaustive_mvc extension "
-            "(set COLBERT_LOAD_TORCH_EXTENSION_VERBOSE=True for more info)..."
-        )
-        att_exhaustive_mvc_cpp = load(
-            name="att_exhaustive_mvc_cpp",
-            sources=[
-                str(Path(__file__).parent.resolve() / "att_exhaustive_mvc.cpp")
-            ],
-            extra_cflags=["-O3"],
-            verbose=os.getenv("COLBERT_LOAD_TORCH_EXTENSION_VERBOSE", "False")
-            == "True",
-        )
-        cls.att_exhaustive_mvc = att_exhaustive_mvc_cpp.att_exhaustive_mvc_cpp
-
     def _constant_keep_num(self, dlen: int, keep_ratio: float) -> int:
         return int(np.ceil(dlen * keep_ratio))
 
-    def first_keep(self, embs: torch.Tensor, keep_ratio=0.75) -> torch.Tensor:
-        return embs[: self._constant_keep_num(embs.shape[0], keep_ratio)]
-
-    def _att_keep(self, embs: torch.Tensor, keep_ratio=0.75, keep_top=False):
+    def attention_pruning(self, embs: torch.Tensor, keep_ratio=0.75) -> torch.Tensor:
         p_doc_len = self._constant_keep_num(embs.shape[0], keep_ratio)
 
         # Discard first 2 (CLS and D) from evaluation
         cand_embs = embs[2:, :]
-        att_sum = torch.sum(cand_embs @ cand_embs.T, dim=0)
+        att = torch.sum(torch.nn.Softmax(dim=0)(cand_embs @ cand_embs.T), dim=1)
+
+        keep_dims = torch.argsort(att, descending=True)[: p_doc_len - 2]
+
+        keep_dims = torch.sort(keep_dims).values
+
+        return torch.cat((embs[:2, :], cand_embs[keep_dims]))
+
+    def first_pruning(self, embs: torch.Tensor, keep_ratio=0.75) -> torch.Tensor:
+        return embs[: self._constant_keep_num(embs.shape[0], keep_ratio)]
+
+    def _similar_keep(self, embs: torch.Tensor, keep_ratio=0.75, keep_top=False):
+        p_doc_len = self._constant_keep_num(embs.shape[0], keep_ratio)
+
+        # Discard first 2 (CLS and D) from evaluation
+        cand_embs = embs[2:, :]
+        sim_sum = torch.sum(cand_embs @ cand_embs.T, dim=0)
 
         # Keep smallest p_doc_len - 2
-        keep_dims = torch.argsort(att_sum, descending=keep_top)[: p_doc_len - 2]
+        keep_dims = torch.argsort(sim_sum, descending=keep_top)[: p_doc_len - 2]
 
         # Sort from smallest index to largest to not mix the order
         keep_dims = torch.sort(keep_dims).values
@@ -112,16 +103,16 @@ class CollectionEncoder:
         # Always include CLS and D in the result
         return torch.cat((embs[:2, :], cand_embs[keep_dims]))
 
-    def att_top_keep(self, embs: torch.Tensor, keep_ratio=0.75) -> torch.Tensor:
-        return self._att_keep(embs, keep_ratio=keep_ratio, keep_top=True)
+    def similar_pruning(self, embs: torch.Tensor, keep_ratio=0.75) -> torch.Tensor:
+        return self._similar_keep(embs, keep_ratio=keep_ratio, keep_top=True)
 
-    def att_bottom_keep(
+    def dissimilar_pruning(
         self, embs: torch.Tensor, keep_ratio=0.75
     ) -> torch.Tensor:
-        return self._att_keep(embs, keep_ratio=keep_ratio, keep_top=False)
+        return self._similar_keep(embs, keep_ratio=keep_ratio, keep_top=False)
 
     # TODO: Benchmark greedy mvc between jgrapht, PyTorch and cpp.
-    def att_greedy_mvc(
+    def gdmis_pruning(
         self, embs: torch.Tensor, edge_threshold=0.8
     ) -> torch.Tensor:
         adj = (embs @ embs.T) >= edge_threshold
@@ -166,7 +157,7 @@ class CollectionEncoder:
         return probs >= dominance_ratio
 
     @classmethod
-    def most_dominant(
+    def dominant_pruning(
         cls,
         embs: torch.Tensor,
         queries: torch.Tensor,
@@ -179,7 +170,7 @@ class CollectionEncoder:
         ]
 
     @classmethod
-    def most_dominant_repair(
+    def dominant_repair_pruning(
         cls,
         embs: torch.Tensor,
         queries: torch.Tensor,
