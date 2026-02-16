@@ -21,3 +21,9 @@ __pycache__/
 # Other
 .vscode
 *.tsv
+
+# Direnv
+/.direnv
+
+# Local mamba
+/.mamba
