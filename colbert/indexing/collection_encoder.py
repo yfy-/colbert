@@ -76,9 +76,15 @@ class CollectionEncoder:
 
         # Discard first 2 (CLS and D) from evaluation
         cand_embs = embs[2:, :]
-        att = torch.sum(torch.nn.Softmax(dim=0)(cand_embs @ cand_embs.T), dim=1)
+        sim = cand_embs @ cand_embs.T
 
-        keep_dims = torch.argsort(att, descending=True)[: p_doc_len - 2]
+        # Set diagonal to prevent self attention dominating.
+        sim[torch.eye(len(sim), dtype=torch.bool, device=sim.device)] = float("-inf")
+
+        att = torch.sum(torch.nn.functional.softmax(sim, dim=0), dim=1)
+
+        keep_cand_len = max(0, p_doc_len - 2)
+        keep_dims = torch.argsort(att, descending=True)[: keep_cand_len]
 
         keep_dims = torch.sort(keep_dims).values
 
@@ -95,7 +101,8 @@ class CollectionEncoder:
         sim_sum = torch.sum(cand_embs @ cand_embs.T, dim=0)
 
         # Keep smallest p_doc_len - 2
-        keep_dims = torch.argsort(sim_sum, descending=keep_top)[: p_doc_len - 2]
+        keep_cand_len = max(0, p_doc_len - 2)
+        keep_dims = torch.argsort(sim_sum, descending=keep_top)[: keep_cand_len]
 
         # Sort from smallest index to largest to not mix the order
         keep_dims = torch.sort(keep_dims).values
