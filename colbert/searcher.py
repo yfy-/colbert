@@ -104,8 +104,7 @@ class Searcher:
         queries_ = list(queries.values())
 
         Q = None
-        qcp_exist = query_cache_path.exists()
-        if query_cache_path is not None and qcp_exist:
+        if query_cache_path is not None and query_cache_path.exists():
             print_message(f"Loading cached Q from: {query_cache_path}")
             Q = torch.load(query_cache_path)
 
@@ -113,7 +112,7 @@ class Searcher:
             print_message("Encoding queries..")
             Q = self.encode(queries_, full_length_search=full_length_search)
 
-        if query_cache_path is not None and not qcp_exist:
+        if query_cache_path is not None and not query_cache_path.exists():
             print_message(f"Caching Q to cache file at: {query_cache_path}")
             torch.save(Q, query_cache_path)
 
