@@ -5,11 +5,12 @@ import sys
 from collections import defaultdict
 
 import torch
+from tqdm import tqdm
 
 
 def main(output_path: str):
     doc2queries = defaultdict(list)
-    for line in sys.stdin:
+    for line in tqdm(sys.stdin):
         qid, did, _, _ = line.rstrip.split("\t")
         doc2queries[did].append(qid)
 
