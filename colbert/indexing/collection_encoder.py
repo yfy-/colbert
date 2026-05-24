@@ -3,7 +3,8 @@ from __future__ import annotations
 import itertools
 import os
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Tuple
+import random
 
 import numpy as np
 import torch
@@ -47,13 +48,12 @@ class CollectionEncoder:
                     self.config.query_maxlen
                 )
 
-                queries = list(
-                    Queries(self.static_pruning_kwargs["queries"]).values()
-                )
+                queries = Queries(self.static_pruning_kwargs["queries"])
+                query_texts = list(queries.values())
                 bsize = 128 if len(queries) > 128 else None
                 print_message("Encoding queries for 'dominant'")
                 Q = self.checkpoint.queryFromText(
-                    queries,
+                    query_texts,
                     bsize=bsize,
                     to_cpu=not self.use_gpu,
                     full_length_search=False,
@@ -63,6 +63,9 @@ class CollectionEncoder:
                     Q = Q.half()
 
                 self.static_pruning_kwargs["queries"] = Q
+                self.static_pruning_kwargs["qid_to_index"] = {
+                    qid: i for qid, i in enumerate(queries.keys())
+                }
 
         self.cache_path = None
         if self.config.encode_cache_path is not None:
@@ -71,7 +74,10 @@ class CollectionEncoder:
     def _constant_keep_num(self, dlen: int, keep_ratio: float) -> int:
         return int(np.ceil(dlen * keep_ratio))
 
-    def attention_pruning(self, embs: torch.Tensor, keep_ratio=0.75) -> torch.Tensor:
+    def attention_pruning(
+        self, pid: int, embs: torch.Tensor, keep_ratio=0.75
+    ) -> torch.Tensor:
+        _ = pid
         p_doc_len = self._constant_keep_num(embs.shape[0], keep_ratio)
 
         # Discard first 2 (CLS and D) from evaluation
@@ -79,21 +85,28 @@ class CollectionEncoder:
         sim = cand_embs @ cand_embs.T
 
         # Set diagonal to prevent self attention dominating.
-        sim[torch.eye(len(sim), dtype=torch.bool, device=sim.device)] = float("-inf")
+        sim[torch.eye(len(sim), dtype=torch.bool, device=sim.device)] = float(
+            "-inf"
+        )
 
         att = torch.sum(torch.nn.functional.softmax(sim, dim=0), dim=1)
 
         keep_cand_len = max(0, p_doc_len - 2)
-        keep_dims = torch.argsort(att, descending=True)[: keep_cand_len]
+        keep_dims = torch.argsort(att, descending=True)[:keep_cand_len]
 
         keep_dims = torch.sort(keep_dims).values
 
         return torch.cat((embs[:2, :], cand_embs[keep_dims]))
 
-    def first_pruning(self, embs: torch.Tensor, keep_ratio=0.75) -> torch.Tensor:
+    def first_pruning(
+        self, pid: int, embs: torch.Tensor, keep_ratio=0.75
+    ) -> torch.Tensor:
+        _ = pid
         return embs[: self._constant_keep_num(embs.shape[0], keep_ratio)]
 
-    def _similar_keep(self, embs: torch.Tensor, keep_ratio=0.75, keep_top=False):
+    def _similar_keep(
+        self, embs: torch.Tensor, keep_ratio=0.75, keep_top=False
+    ):
         p_doc_len = self._constant_keep_num(embs.shape[0], keep_ratio)
 
         # Discard first 2 (CLS and D) from evaluation
@@ -102,7 +115,7 @@ class CollectionEncoder:
 
         # Keep smallest p_doc_len - 2
         keep_cand_len = max(0, p_doc_len - 2)
-        keep_dims = torch.argsort(sim_sum, descending=keep_top)[: keep_cand_len]
+        keep_dims = torch.argsort(sim_sum, descending=keep_top)[:keep_cand_len]
 
         # Sort from smallest index to largest to not mix the order
         keep_dims = torch.sort(keep_dims).values
@@ -110,18 +123,23 @@ class CollectionEncoder:
         # Always include CLS and D in the result
         return torch.cat((embs[:2, :], cand_embs[keep_dims]))
 
-    def similar_pruning(self, embs: torch.Tensor, keep_ratio=0.75) -> torch.Tensor:
+    def similar_pruning(
+        self, pid: int, embs: torch.Tensor, keep_ratio=0.75
+    ) -> torch.Tensor:
+        _ = pid
         return self._similar_keep(embs, keep_ratio=keep_ratio, keep_top=True)
 
     def dissimilar_pruning(
-        self, embs: torch.Tensor, keep_ratio=0.75
+        self, pid: int, embs: torch.Tensor, keep_ratio=0.75
     ) -> torch.Tensor:
+        _ = pid
         return self._similar_keep(embs, keep_ratio=keep_ratio, keep_top=False)
 
     # TODO: Benchmark greedy mvc between jgrapht, PyTorch and cpp.
     def gdmis_pruning(
-        self, embs: torch.Tensor, edge_threshold=0.8
+        self, pid: int, embs: torch.Tensor, edge_threshold=0.8
     ) -> torch.Tensor:
+        _ = pid
         adj = (embs @ embs.T) >= edge_threshold
 
         # Remove self loops.
@@ -166,19 +184,31 @@ class CollectionEncoder:
     @classmethod
     def dominant_pruning(
         cls,
+        pid: int,
         embs: torch.Tensor,
         queries: torch.Tensor,
+        qid_to_index: Dict[int, int],
+        pid_to_qids: Dict[int, List[int]],
         dominance_ratio=0.01,
+        min_sample_size=1000,
     ) -> torch.Tensor:
+        q_idxs = [qid_to_index[qid] for qid in pid_to_qids[pid]]
+        if len(q_idxs) < min_sample_size:
+            random_sample_sz = min_sample_size - len(q_idxs)
+            sample_set = set(range(len(queries))) - set(q_idxs)
+            q_idxs += random.sample(sample_set, random_sample_sz)
+
+
         return embs[
             cls._arg_most_dominant(
-                embs, queries, dominance_ratio=dominance_ratio
+                embs, queries[q_idxs], dominance_ratio=dominance_ratio
             )
         ]
 
     @classmethod
     def dominant_repair_pruning(
         cls,
+        pid: int,
         embs: torch.Tensor,
         queries: torch.Tensor,
         dominance_ratio=0.01,
@@ -227,18 +257,22 @@ class CollectionEncoder:
         return kept_embs
 
     def static_prune(
-        self, embs: torch.Tensor, doclens: List[int], **prune_kwargs
+        self,
+        embs: torch.Tensor,
+        doclens: List[int],
+        pids: List[int],
+        **prune_kwargs,
     ) -> Tuple[torch.Tensor, List[int]]:
         offset = 0
         pruned_embs = []
         pruned_doclens = []
-        for dlen in doclens:
+        for pid, dlen in zip(pids, doclens):
             d_embs = embs[offset : offset + dlen]
             if self.use_gpu:
                 d_embs = d_embs.to("cuda")
 
             offset += dlen
-            pd_embs = self.static_prune_func(d_embs, **prune_kwargs)
+            pd_embs = self.static_prune_func(pid, d_embs, **prune_kwargs)
             # Always accumulate in CPU because most likely GPU mem
             # is not enough.
             pruned_embs.append(pd_embs.to("cpu"))
@@ -247,11 +281,21 @@ class CollectionEncoder:
         print(f"Avg doclen after pruning: {np.mean(pruned_doclens)}")
         return torch.cat(pruned_embs), pruned_doclens
 
-    def encode_passages(self, passages, chunk_idx=None):
+    # TODO: Most likely we need to pass passage ids separately to this
+    # function to support most dominant pruning method.
+    def encode_passages(
+        self,
+        passages: List[str],
+        chunk_idx: Optional[int] = None,
+        pids: Optional[List[int]] = None,
+    ):
         Run().print(f"#> Encoding {len(passages)} passages..")
 
         if len(passages) == 0:
             return None, None
+
+        if self.static_prune_func is not None and pids id None:
+            raise ValueError("Static pruning cannot run without pids!")
 
         use_cache = self.cache_path is not None and chunk_idx is not None
         embs_path = (
@@ -297,8 +341,9 @@ class CollectionEncoder:
                 "Static pruning enabled with "
                 f"method '{self.config.static_pruning_method}'."
             )
+
             return self.static_prune(
-                embs, doclens, **self.static_pruning_kwargs
+                embs, doclens, pids, **self.static_pruning_kwargs
             )
 
         return embs, doclens

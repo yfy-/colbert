@@ -10,6 +10,7 @@
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        condaFile = if pkgs.stdenv.isDarwin then "conda_env_cpu.yml" else "conda_env.yml";
       in
       {
         devShells.default = pkgs.mkShell {
@@ -22,13 +23,13 @@
             export FLAKE_ROOT="$(git rev-parse --show-toplevel)"
             export MAMBA_ROOT_PREFIX="$FLAKE_ROOT/.mamba"
             if [ ! -d "$MAMBA_ROOT_PREFIX/envs/colbert" ]; then
-              micromamba create -f conda_env.yml -n colbert -y
+              micromamba create -f ${condaFile} -n colbert -y
+              pip install python-lsp-server python-lsp-black python-lsp-isort
             fi
 
             export PATH=$MAMBA_ROOT_PREFIX/envs/colbert/bin:$PATH
             export CONDA_PREFIX=$MAMBA_ROOT_PREFIX/envs/colbert
             export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/run/opengl-driver/lib
-            pip install python-lsp-server python-lsp-black python-lsp-isort
           '';
         };
       }

@@ -1,11 +1,12 @@
-import os
 import cProfile
+import os
 import pstats
-import tqdm
-import time
-import ujson
-import torch
 import random
+import time
+
+import torch
+import tqdm
+import ujson
 
 try:
     import faiss
@@ -14,21 +15,18 @@ except ImportError as e:
 
 import numpy as np
 import torch.multiprocessing as mp
-from colbert.infra.config.config import ColBERTConfig
 
 import colbert.utils.distributed as distributed
-
-from colbert.infra.run import Run
-from colbert.infra.launcher import print_memory_stats
-from colbert.modeling.checkpoint import Checkpoint
 from colbert.data.collection import Collection
-
+from colbert.indexing.codecs.residual import ResidualCodec
 from colbert.indexing.collection_encoder import CollectionEncoder
 from colbert.indexing.index_saver import IndexSaver
 from colbert.indexing.utils import optimize_ivf
+from colbert.infra.config.config import ColBERTConfig
+from colbert.infra.launcher import print_memory_stats
+from colbert.infra.run import Run
+from colbert.modeling.checkpoint import Checkpoint
 from colbert.utils.utils import flatten, print_message
-
-from colbert.indexing.codecs.residual import ResidualCodec
 
 
 def encode(config, collection, shared_lists, shared_queues):
@@ -153,7 +151,9 @@ class CollectionIndexer:
             passage for pid, passage in local_pids if pid in sampled_pids
         ]
 
-        local_sample_embs, doclens = self.encoder.encode_passages(local_sample)
+        local_sample_embs, doclens = self.encoder.encode_passages(
+            local_sample, pids=list(sampled_pids)
+        )
 
         if torch.cuda.is_available():
             self.num_sample_embs = torch.tensor(
@@ -430,7 +430,9 @@ class CollectionIndexer:
                     continue
                 # Encode passages into embeddings with the checkpoint model
                 embs, doclens = self.encoder.encode_passages(
-                    passages, chunk_idx=chunk_idx
+                    passages,
+                    chunk_idx=chunk_idx,
+                    pids=list(range(offset, offset + len(passages))),
                 )
                 if self.use_gpu:
                     assert embs.dtype == torch.float16
