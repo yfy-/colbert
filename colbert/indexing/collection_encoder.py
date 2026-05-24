@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import itertools
 import os
+import random
 from pathlib import Path
 from typing import Dict, List, Tuple
-import random
 
 import numpy as np
 import torch
@@ -66,6 +66,9 @@ class CollectionEncoder:
                 self.static_pruning_kwargs["qid_to_index"] = {
                     qid: i for qid, i in enumerate(queries.keys())
                 }
+                self.static_pruning_kwargs["pid_to_qids"] = torch.load(
+                    self.static_pruning_kwargs["pid_to_qids"]
+                )
 
         self.cache_path = None
         if self.config.encode_cache_path is not None:
@@ -197,7 +200,6 @@ class CollectionEncoder:
             random_sample_sz = min_sample_size - len(q_idxs)
             sample_set = set(range(len(queries))) - set(q_idxs)
             q_idxs += random.sample(sample_set, random_sample_sz)
-
 
         return embs[
             cls._arg_most_dominant(
