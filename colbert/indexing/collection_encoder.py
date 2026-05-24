@@ -294,7 +294,7 @@ class CollectionEncoder:
         if len(passages) == 0:
             return None, None
 
-        if self.static_prune_func is not None and pids id None:
+        if self.static_prune_func is not None and pids is None:
             raise ValueError("Static pruning cannot run without pids!")
 
         use_cache = self.cache_path is not None and chunk_idx is not None
