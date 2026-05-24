@@ -55,7 +55,8 @@ class CollectionEncoder:
                 Q = self.checkpoint.queryFromText(
                     query_texts,
                     bsize=bsize,
-                    to_cpu=not self.use_gpu,
+                    # Accumulate the entire query log in CPU since it can be very large.
+                    to_cpu=True,
                     full_length_search=False,
                 )
                 Q = Q.view(Q.shape[0] * Q.shape[1], Q.shape[2])
@@ -194,6 +195,7 @@ class CollectionEncoder:
         pid_to_qids: Dict[int, List[int]],
         dominance_ratio=0.01,
         min_sample_size=1000,
+        device="cuda",
     ) -> torch.Tensor:
         q_idxs = [qid_to_index[qid] for qid in pid_to_qids[pid]]
         if len(q_idxs) < min_sample_size:
@@ -203,7 +205,7 @@ class CollectionEncoder:
 
         return embs[
             cls._arg_most_dominant(
-                embs, queries[q_idxs], dominance_ratio=dominance_ratio
+                embs, queries[q_idxs].to(device), dominance_ratio=dominance_ratio
             )
         ]
 
