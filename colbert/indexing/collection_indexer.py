@@ -429,6 +429,9 @@ class CollectionIndexer:
                     )
                     continue
                 # Encode passages into embeddings with the checkpoint model
+                Run().print_main(
+                        f"#> Encoding offset: {offset}."
+                    )
                 embs, doclens = self.encoder.encode_passages(
                     passages,
                     chunk_idx=chunk_idx,
