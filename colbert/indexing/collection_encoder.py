@@ -67,6 +67,7 @@ class CollectionEncoder:
                 self.static_pruning_kwargs["qid_to_index"] = {
                     qid: i for qid, i in enumerate(queries.keys())
                 }
+                self.static_pruning_kwargs["query_index_set"] = set(range(len(queries)))
                 self.static_pruning_kwargs["pid_to_qids"] = torch.load(
                     self.static_pruning_kwargs["pid_to_qids"]
                 )
@@ -193,14 +194,16 @@ class CollectionEncoder:
         queries: torch.Tensor,
         qid_to_index: Dict[int, int],
         pid_to_qids: Dict[int, List[int]],
+        query_index_set=None,
         dominance_ratio=0.01,
         min_sample_size=1000,
         device="cuda",
     ) -> torch.Tensor:
         q_idxs = [qid_to_index[qid] for qid in pid_to_qids[pid]]
         if len(q_idxs) < min_sample_size:
+            print_message(f"Not enough ({len_q_idxs}) samples for pid: {pid}.")
             random_sample_sz = min_sample_size - len(q_idxs)
-            sample_set = set(range(len(queries))) - set(q_idxs)
+            sample_set = query_index_set - set(q_idxs)
             q_idxs += random.sample(sample_set, random_sample_sz)
 
         return embs[
