@@ -201,7 +201,7 @@ class CollectionEncoder:
     ) -> torch.Tensor:
         q_idxs = [qid_to_index[qid] for qid in pid_to_qids[pid]]
         if len(q_idxs) < min_sample_size:
-            print_message(f"Not enough ({len_q_idxs}) samples for pid: {pid}.")
+            print_message(f"Not enough ({len(q_idxs)}) samples for pid: {pid}.")
             random_sample_sz = min_sample_size - len(q_idxs)
             sample_set = query_index_set - set(q_idxs)
             q_idxs += random.sample(sample_set, random_sample_sz)
