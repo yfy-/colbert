@@ -65,7 +65,7 @@ class CollectionEncoder:
 
                 self.static_pruning_kwargs["queries"] = Q
                 self.static_pruning_kwargs["qid_to_index"] = {
-                    qid: i for qid, i in enumerate(queries.keys())
+                    qid: i for i, qid in enumerate(queries.keys())
                 }
                 self.static_pruning_kwargs["query_index_set"] = set(range(len(queries)))
                 self.static_pruning_kwargs["pid_to_qids"] = torch.load(
