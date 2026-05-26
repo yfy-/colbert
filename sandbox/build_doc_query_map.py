@@ -12,7 +12,7 @@ def main(output_path: str):
     doc2queries = defaultdict(list)
     for line in tqdm(sys.stdin):
         qid, did, _, _ = line.rstrip().split("\t")
-        doc2queries[did].append(qid)
+        doc2queries[int(did)].append(int(qid))
 
     torch.save(doc2queries, output_path)
 
