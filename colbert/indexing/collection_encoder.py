@@ -10,6 +10,7 @@ import numpy as np
 import torch
 import torch.nn.functional as torch_f
 from torch.utils.cpp_extension import load
+from tqdm import tqdm
 
 from colbert.data import Queries
 from colbert.infra.run import Run
@@ -67,7 +68,9 @@ class CollectionEncoder:
                 self.static_pruning_kwargs["qid_to_index"] = {
                     qid: i for i, qid in enumerate(queries.keys())
                 }
-                self.static_pruning_kwargs["query_index_set"] = set(range(len(queries)))
+                self.static_pruning_kwargs["query_index_set"] = set(
+                    range(len(queries))
+                )
                 self.static_pruning_kwargs["pid_to_qids"] = torch.load(
                     self.static_pruning_kwargs["pid_to_qids"]
                 )
@@ -196,19 +199,20 @@ class CollectionEncoder:
         pid_to_qids: Dict[int, List[int]],
         query_index_set=None,
         dominance_ratio=0.01,
-        min_sample_size=1000,
+        min_sample_size=100,
         device="cuda",
     ) -> torch.Tensor:
         q_idxs = [qid_to_index[qid] for qid in pid_to_qids[pid]]
         if len(q_idxs) < min_sample_size:
-            print_message(f"Not enough ({len(q_idxs)}) samples for pid: {pid}.")
             random_sample_sz = min_sample_size - len(q_idxs)
             sample_set = query_index_set - set(q_idxs)
             q_idxs += random.sample(sample_set, random_sample_sz)
 
         return embs[
             cls._arg_most_dominant(
-                embs, queries[q_idxs].to(device), dominance_ratio=dominance_ratio
+                embs,
+                queries[q_idxs].to(device),
+                dominance_ratio=dominance_ratio,
             )
         ]
 
@@ -273,7 +277,9 @@ class CollectionEncoder:
         offset = 0
         pruned_embs = []
         pruned_doclens = []
-        for pid, dlen in zip(pids, doclens):
+        for pid, dlen in tqdm(
+            iterable=zip(pids, doclens), total=len(pids), desc="Static pruning"
+        ):
             d_embs = embs[offset : offset + dlen]
             if self.use_gpu:
                 d_embs = d_embs.to("cuda")
