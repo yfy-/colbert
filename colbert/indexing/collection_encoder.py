@@ -55,7 +55,7 @@ class CollectionEncoder:
                 queries = Queries(self.static_pruning_kwargs["queries"])
                 query_texts = list(queries.values())
                 bsize = 128 if len(queries) > 128 else None
-                print_message("Encoding queries for 'dominant'")
+                print_message(f"Encoding queries for '{sm}'")
                 Q = self.checkpoint.queryFromText(
                     query_texts,
                     bsize=bsize,
