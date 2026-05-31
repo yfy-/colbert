@@ -73,7 +73,8 @@ class CollectionEncoder:
         if self.config.encode_cache_path is not None:
             self.cache_path = Path(self.config.encode_cache_path)
 
-    def _constant_keep_num(self, dlen: int, keep_ratio: float) -> int:
+    @staticmethod
+    def _constant_keep_num(dlen: int, keep_ratio: float) -> int:
         return int(np.ceil(dlen * keep_ratio))
 
     def attention_pruning(
