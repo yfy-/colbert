@@ -19,6 +19,8 @@ from colbert.utils.utils import batch, print_message
 
 class CollectionEncoder:
 
+    static_prune_query_methods = {"dominant", "dominant_repair", "gas"}
+
     def __init__(self, config, checkpoint):
         self.config = config
         self.checkpoint = checkpoint
@@ -33,6 +35,7 @@ class CollectionEncoder:
             "first": self.first_pruning,
             "gdmis": self.gdmis_pruning,
             "similar": self.similar_pruning,
+            "gas": self.gas,
         }
 
         self.static_prune_func = None
@@ -44,7 +47,7 @@ class CollectionEncoder:
 
             self.static_prune_func = self.static_prune_funcs[sm]
             self.static_pruning_kwargs = dict(self.config.static_pruning_kwargs)
-            if self.config.static_pruning_method.startswith("dominant"):
+            if sm in self.static_prune_query_methods:
                 self.checkpoint.query_tokenizer.query_maxlen = (
                     self.config.query_maxlen
                 )
@@ -57,7 +60,7 @@ class CollectionEncoder:
                     query_texts,
                     bsize=bsize,
                     # Accumulate the entire query log in CPU since it can be very large.
-                    to_cpu=True,
+                    to_cpu=False,
                     full_length_search=False,
                 )
                 Q = Q.view(Q.shape[0] * Q.shape[1], Q.shape[2])
@@ -65,15 +68,6 @@ class CollectionEncoder:
                     Q = Q.half()
 
                 self.static_pruning_kwargs["queries"] = Q
-                self.static_pruning_kwargs["qid_to_index"] = {
-                    qid: i for i, qid in enumerate(queries.keys())
-                }
-                self.static_pruning_kwargs["query_index_set"] = set(
-                    range(len(queries))
-                )
-                self.static_pruning_kwargs["pid_to_qids"] = torch.load(
-                    self.static_pruning_kwargs["pid_to_qids"]
-                )
 
         self.cache_path = None
         if self.config.encode_cache_path is not None:
@@ -179,15 +173,39 @@ class CollectionEncoder:
         return embs[keep_mask]
 
     @classmethod
-    def _arg_most_dominant(
-        cls, embs: torch.Tensor, queries: torch.Tensor, dominance_ratio=0.01
-    ) -> torch.Tensor:
+    def _dominance_probs(cls, embs: torch.Tensor, queries: torch) -> torch.Tensor:
         # Q x N
         scores = queries @ embs.T
         max_emb_args = torch.argmax(scores, dim=1)
         counts = torch.bincount(max_emb_args, minlength=embs.shape[0])
-        probs = counts / queries.shape[0]
-        return probs >= dominance_ratio
+        return counts / queries.shape[0]
+
+    @classmethod
+    def _arg_most_dominant(
+        cls, embs: torch.Tensor, queries: torch.Tensor, dominance_ratio=0.01
+    ) -> torch.Tensor:
+        return cls._dominance_probs(embs, queries) >= dominance_ratio
+
+    @classmethod
+    def gas(
+        cls,
+        pid: int,
+        embs: torch.Tensor,
+        queries: torch.Tensor,
+        keep_ratio: float = 0.75,
+        c: float = 1.0,
+    ) -> torch.Tensor:
+        _ = pid
+        importances = cls._dominance_probs(embs, queries)
+        keep_mask = torch.zeros(len(embs), dtype=torch.bool)
+        sims = embs @ embs.T
+        for _ in range(cls._constant_keep_num(len(embs), keep_ratio)):
+            most_important = torch.argmax(importances)
+            keep_mask[most_important] = True
+            importances[most_important] = float("-inf")
+            importances -= 2 * c * sims[most_important]
+
+        return embs[keep_mask]
 
     @classmethod
     def dominant_pruning(
@@ -195,23 +213,13 @@ class CollectionEncoder:
         pid: int,
         embs: torch.Tensor,
         queries: torch.Tensor,
-        qid_to_index: Dict[int, int],
-        pid_to_qids: Dict[int, List[int]],
-        query_index_set=None,
         dominance_ratio=0.01,
-        min_sample_size=100,
-        device="cuda",
     ) -> torch.Tensor:
-        q_idxs = [qid_to_index[qid] for qid in pid_to_qids[pid]]
-        if len(q_idxs) < min_sample_size:
-            random_sample_sz = min_sample_size - len(q_idxs)
-            sample_set = query_index_set - set(q_idxs)
-            q_idxs += random.sample(sample_set, random_sample_sz)
-
+        _ = pid
         return embs[
             cls._arg_most_dominant(
                 embs,
-                queries[q_idxs].to(device),
+                queries,
                 dominance_ratio=dominance_ratio,
             )
         ]
@@ -227,6 +235,7 @@ class CollectionEncoder:
         num_neighbors=5,
         step_size=0.25,
     ) -> torch.Tensor:
+        _ = pid
         keep_mask = cls._arg_most_dominant(
             embs, queries, dominance_ratio=dominance_ratio
         )
