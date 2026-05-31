@@ -173,7 +173,9 @@ class CollectionEncoder:
         return embs[keep_mask]
 
     @classmethod
-    def _dominance_probs(cls, embs: torch.Tensor, queries: torch) -> torch.Tensor:
+    def _dominance_probs(
+        cls, embs: torch.Tensor, queries: torch
+    ) -> torch.Tensor:
         # Q x N
         scores = queries @ embs.T
         max_emb_args = torch.argmax(scores, dim=1)
@@ -192,8 +194,8 @@ class CollectionEncoder:
         pid: int,
         embs: torch.Tensor,
         queries: torch.Tensor,
-        keep_ratio: float = 0.75,
-        c: float = 1.0,
+        keep_ratio=0.75,
+        c=1.0,
     ) -> torch.Tensor:
         _ = pid
         importances = cls._dominance_probs(embs, queries)
