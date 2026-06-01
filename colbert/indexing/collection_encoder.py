@@ -195,21 +195,21 @@ class CollectionEncoder:
         pid: int,
         embs: torch.Tensor,
         queries: torch.Tensor,
-        keep_ratio=0.75,
-        c=1.0,
+        keep_ratio: float = 0.75,
+        c: float = 1.0,
     ) -> torch.Tensor:
         _ = pid
         importances = cls._dominance_probs(embs, queries)
-        keep_mask = torch.zeros(len(embs), dtype=torch.bool)
-        sims = embs @ embs.T
-        for _ in range(cls._constant_keep_num(len(embs), keep_ratio)):
+        keep_mask = torch.zeros(embs.shape[0], dtype=torch.bool, device=embs.device)
+        penalty_sims = (embs @ embs.T) * (2.0 * c)
+
+        for _ in range(cls._constant_keep_num(embs.shape[0], keep_ratio)):
             most_important = torch.argmax(importances)
             keep_mask[most_important] = True
             importances[most_important] = float("-inf")
-            importances -= 2 * c * sims[most_important]
+            importances -= penalty_sims[most_important]
 
         return embs[keep_mask]
-
     @classmethod
     def dominant_pruning(
         cls,
