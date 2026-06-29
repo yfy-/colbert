@@ -42,6 +42,7 @@ def json_qrel(qrel_path: str):
 def main(args):
     qid2ranking = defaultdict(list)
     qid2mrr = {}
+    qid2ndcg = {}
     qid2recall = {depth: {} for depth in [50, 200, 1000, 5000, 10000]}
 
     print_message(f"#> Loading QRELs from {args.qrels} ..")
@@ -76,12 +77,13 @@ def main(args):
         print_message(f"#> {num_judged_queries} != {num_ranked_queries}")
         print()
 
-    print_message(f"#> Computing MRR@10 for {num_judged_queries} queries.")
+    print_message(f"#> Computing MRR@10 and NDCG@10 for {num_judged_queries} queries.")
 
     for qid in tqdm.tqdm(qid2positives):
         ranking = qid2ranking[qid]
         positives = qid2positives[qid]
 
+        # MRR@10
         for rank, (_, pid, _) in enumerate(ranking):
             rank = rank + 1  # 1-indexed
 
@@ -90,6 +92,22 @@ def main(args):
                     qid2mrr[qid] = 1.0 / rank
                 break
 
+        # NDCG@10
+        dcg_10 = 0.0
+        for rank, (_, pid, _) in enumerate(ranking[:10]):
+            if pid in positives:
+                dcg_10 += 1.0 / math.log2(rank + 2)
+
+        idcg_10 = 0.0
+        for i in range(min(len(positives), 10)):
+            idcg_10 += 1.0 / math.log2(i + 2)
+
+        if idcg_10 > 0:
+            qid2ndcg[qid] = dcg_10 / idcg_10
+        else:
+            qid2ndcg[qid] = 0.0
+
+        # Recall
         for rank, (_, pid, _) in enumerate(ranking):
             rank = rank + 1  # 1-indexed
 
@@ -104,12 +122,21 @@ def main(args):
         len(qid2mrr),
         num_ranked_queries,
     )
+    assert len(qid2ndcg) <= num_ranked_queries, (
+        len(qid2ndcg),
+        num_ranked_queries,
+    )
 
     print()
     mrr_10_sum = sum(qid2mrr.values())
+    ndcg_10_sum = sum(qid2ndcg.values())
     print_message(f"#> MRR@10 = {mrr_10_sum / num_judged_queries}")
     print_message(
         f"#> MRR@10 (only for ranked queries) = {mrr_10_sum / num_ranked_queries}"
+    )
+    print_message(f"#> NDCG@10 = {ndcg_10_sum / num_judged_queries}")
+    print_message(
+        f"#> NDCG@10 (only for ranked queries) = {ndcg_10_sum / num_ranked_queries}"
     )
     print()
 
