@@ -200,7 +200,9 @@ class CollectionEncoder:
     ) -> torch.Tensor:
         _ = pid
         importances = cls._dominance_probs(embs, queries)
-        keep_mask = torch.zeros(embs.shape[0], dtype=torch.bool, device=embs.device)
+        keep_mask = torch.zeros(
+            embs.shape[0], dtype=torch.bool, device=embs.device
+        )
         penalty_sims = (embs @ embs.T) * (2.0 * c)
 
         for _ in range(cls._constant_keep_num(embs.shape[0], keep_ratio)):
@@ -210,6 +212,7 @@ class CollectionEncoder:
             importances -= penalty_sims[most_important]
 
         return embs[keep_mask]
+
     @classmethod
     def dominant_pruning(
         cls,
@@ -329,6 +332,9 @@ class CollectionEncoder:
         dlens_path = (
             self.cache_path / f"dlens_{chunk_idx}.pt" if use_cache else None
         )
+        tokens_path = (
+            self.cache_path / f"tokens_{chunk_idx}.pt" if use_cache else None
+        )
         with torch.inference_mode():
             if (
                 embs_path is not None
@@ -339,27 +345,30 @@ class CollectionEncoder:
                 embs = torch.load(embs_path)
                 doclens = torch.load(dlens_path)
             else:
-                embs, doclens = [], []
+                embs, doclens, tokens = [], [], []
 
                 # Batch here to avoid OOM from storing intermediate
                 # embeddings on GPU.  Storing on the GPU helps with speed
                 # of masking, etc.  But ideally this batching happens
                 # internally inside docFromText.
                 for passages_batch in batch(passages, self.config.bsize * 50):
-                    embs_, doclens_ = self.checkpoint.docFromText(
+                    embs_, doclens_, tokens_ = self.checkpoint.docFromText(
                         passages_batch,
                         bsize=self.config.bsize,
                         keep_dims="flatten",
                         showprogress=(not self.use_gpu),
+                        return_tokens=True,
                     )
                     embs.append(embs_)
                     doclens.extend(doclens_)
+                    tokens.extend(tokens_)
 
                 embs = torch.cat(embs)
                 if use_cache:
                     self.cache_path.mkdir(parents=True, exist_ok=True)
                     torch.save(embs, embs_path)
                     torch.save(doclens, dlens_path)
+                    torch.save(tokens, tokens_path)
 
         if self.static_prune_func is not None:
             print_message(
