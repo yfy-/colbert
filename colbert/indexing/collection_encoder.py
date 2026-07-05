@@ -36,6 +36,7 @@ class CollectionEncoder:
             "gdmis": self.gdmis_pruning,
             "similar": self.similar_pruning,
             "gas": self.gas,
+            "idf": self.idf_pruning,
         }
 
         self.static_prune_func = None
@@ -68,19 +69,38 @@ class CollectionEncoder:
                     Q = Q.half()
 
                 self.static_pruning_kwargs["queries"] = Q
+            if sm == "idf":
+                dfs = torch.load(self.static_pruning_kwargs["dfs"])
+                lowest_idfs = self.compute_lowest_idf(dfs, 100).to(
+                    "cuda" if self.use_gpu else "cpu"
+                )
+                del self.static_pruning_kwargs["dfs"]
+                self.static_pruning_kwargs["lowest_idfs"] = lowest_idfs
 
         self.cache_path = None
         if self.config.encode_cache_path is not None:
             self.cache_path = Path(self.config.encode_cache_path)
 
     @staticmethod
+    def compute_lowest_idf(dfs: torch.Tensor, k: int) -> torch.Tensor:
+        dfs = dfs.clone()
+        # 3 is for not including special token IDS: [CLS] (102), [D] (101), [SEP] (2)
+        spec_tokens = torch.tensor([2, 101, 102])
+        dfs[spec_tokens] = -1
+        return torch.topk(dfs, k).indices
+
+    @staticmethod
     def _constant_keep_num(dlen: int, keep_ratio: float) -> int:
         return int(np.ceil(dlen * keep_ratio))
 
     def attention_pruning(
-        self, pid: int, embs: torch.Tensor, keep_ratio=0.75
+        self,
+        pid: int,
+        embs: torch.Tensor,
+        tokens: torch.Tensor,
+        keep_ratio=0.75,
     ) -> torch.Tensor:
-        _ = pid
+        _, _ = pid, tokens
         p_doc_len = self._constant_keep_num(embs.shape[0], keep_ratio)
 
         # Discard first 2 (CLS and D) from evaluation
@@ -102,9 +122,13 @@ class CollectionEncoder:
         return torch.cat((embs[:2, :], cand_embs[keep_dims]))
 
     def first_pruning(
-        self, pid: int, embs: torch.Tensor, keep_ratio=0.75
+        self,
+        pid: int,
+        embs: torch.Tensor,
+        tokens: torch.Tensor,
+        keep_ratio=0.75,
     ) -> torch.Tensor:
-        _ = pid
+        _, _ = pid, tokens
         return embs[: self._constant_keep_num(embs.shape[0], keep_ratio)]
 
     def _similar_keep(
@@ -127,22 +151,34 @@ class CollectionEncoder:
         return torch.cat((embs[:2, :], cand_embs[keep_dims]))
 
     def similar_pruning(
-        self, pid: int, embs: torch.Tensor, keep_ratio=0.75
+        self,
+        pid: int,
+        embs: torch.Tensor,
+        tokens: torch.Tensor,
+        keep_ratio=0.75,
     ) -> torch.Tensor:
-        _ = pid
+        _, _ = pid, tokens
         return self._similar_keep(embs, keep_ratio=keep_ratio, keep_top=True)
 
     def dissimilar_pruning(
-        self, pid: int, embs: torch.Tensor, keep_ratio=0.75
+        self,
+        pid: int,
+        embs: torch.Tensor,
+        tokens: torch.Tensor,
+        keep_ratio=0.75,
     ) -> torch.Tensor:
-        _ = pid
+        _, _ = pid, tokens
         return self._similar_keep(embs, keep_ratio=keep_ratio, keep_top=False)
 
     # TODO: Benchmark greedy mvc between jgrapht, PyTorch and cpp.
     def gdmis_pruning(
-        self, pid: int, embs: torch.Tensor, edge_threshold=0.8
+        self,
+        pid: int,
+        embs: torch.Tensor,
+        tokens: torch.Tensor,
+        edge_threshold=0.8,
     ) -> torch.Tensor:
-        _ = pid
+        _, _ = pid, tokens
         adj = (embs @ embs.T) >= edge_threshold
 
         # Remove self loops.
@@ -173,6 +209,15 @@ class CollectionEncoder:
 
         return embs[keep_mask]
 
+    def idf_pruning(
+        self,
+        pid: int,
+        embs: torch.Tensor,
+        tokens: torch.Tensor,
+        lowest_idfs: torch.Tensor,
+    ):
+        return embs
+
     @classmethod
     def _dominance_probs(
         cls, embs: torch.Tensor, queries: torch
@@ -194,11 +239,12 @@ class CollectionEncoder:
         cls,
         pid: int,
         embs: torch.Tensor,
+        tokens: torch.Tensor,
         queries: torch.Tensor,
         keep_ratio: float = 0.75,
         c: float = 1.0,
     ) -> torch.Tensor:
-        _ = pid
+        _, _ = pid, tokens
         importances = cls._dominance_probs(embs, queries)
         keep_mask = torch.zeros(
             embs.shape[0], dtype=torch.bool, device=embs.device
@@ -218,10 +264,11 @@ class CollectionEncoder:
         cls,
         pid: int,
         embs: torch.Tensor,
+        tokens: torch.Tensor,
         queries: torch.Tensor,
         dominance_ratio=0.01,
     ) -> torch.Tensor:
-        _ = pid
+        _, _ = pid, tokens
         return embs[
             cls._arg_most_dominant(
                 embs,
@@ -235,13 +282,14 @@ class CollectionEncoder:
         cls,
         pid: int,
         embs: torch.Tensor,
+        tokens: torch.Tensor,
         queries: torch.Tensor,
         dominance_ratio=0.01,
         iters=3,
         num_neighbors=5,
         step_size=0.25,
     ) -> torch.Tensor:
-        _ = pid
+        _, _ = pid, tokens
         keep_mask = cls._arg_most_dominant(
             embs, queries, dominance_ratio=dominance_ratio
         )
@@ -286,21 +334,31 @@ class CollectionEncoder:
         self,
         embs: torch.Tensor,
         doclens: List[int],
+        tokens: List[int],
         pids: List[int],
         **prune_kwargs,
     ) -> Tuple[torch.Tensor, List[int]]:
         offset = 0
         pruned_embs = []
         pruned_doclens = []
-        for pid, dlen in tqdm(
-            iterable=zip(pids, doclens), total=len(pids), desc="Static pruning"
+        for (
+            pid,
+            dlen,
+            dtokens,
+        ) in tqdm(
+            iterable=zip(pids, doclens, tokens),
+            total=len(pids),
+            desc="Static pruning",
         ):
             d_embs = embs[offset : offset + dlen]
             if self.use_gpu:
                 d_embs = d_embs.to("cuda")
+                tokens = tokens.to("cuda")
 
             offset += dlen
-            pd_embs = self.static_prune_func(pid, d_embs, **prune_kwargs)
+            pd_embs = self.static_prune_func(
+                pid, d_embs, dtokens, **prune_kwargs
+            )
             # Always accumulate in CPU because most likely GPU mem
             # is not enough.
             pruned_embs.append(pd_embs.to("cpu"))
@@ -341,9 +399,12 @@ class CollectionEncoder:
                 and embs_path.exists()
                 and dlens_path is not None
                 and dlens_path.exists()
+                and tokens_path is not None
+                and tokens_path.exists()
             ):
                 embs = torch.load(embs_path)
                 doclens = torch.load(dlens_path)
+                tokens = torch.load(tokens(path))
             else:
                 embs, doclens, tokens = [], [], []
 
@@ -377,7 +438,7 @@ class CollectionEncoder:
             )
 
             return self.static_prune(
-                embs, doclens, pids, **self.static_pruning_kwargs
+                embs, doclens, tokens, pids, **self.static_pruning_kwargs
             )
 
         return embs, doclens

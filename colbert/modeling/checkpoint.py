@@ -56,7 +56,7 @@ class Checkpoint(ColBERT):
             text_batches, reverse_indices = self.doc_tokenizer.tensorize(docs, bsize=bsize)
 
             returned_text = []
-            if return_tokens:
+            if return_tokens and keep_dims != "flatten":
                 returned_text = [text for batch in text_batches for text in batch[0]]
                 returned_text = [returned_text[idx] for idx in reverse_indices.tolist()]
                 returned_text = [returned_text]
@@ -82,6 +82,9 @@ class Checkpoint(ColBERT):
 
                 D = D.view(-1, self.colbert_config.dim)
                 D = D[mask.bool().flatten()].cpu()
+                if return_tokens:
+                    ids = torch.cat([b[0] for b in text_batches])[reverse_indices]
+                    returned_text = [ids[mask.squeeze(-1).bool()].cpu()]
 
                 return (D, doclens, *returned_text)
 
