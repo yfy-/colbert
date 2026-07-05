@@ -84,7 +84,7 @@ class Checkpoint(ColBERT):
                 D = D[mask.bool().flatten()].cpu()
                 if return_tokens:
                     ids = torch.cat([b[0] for b in text_batches])[reverse_indices]
-                    returned_text = [ids[mask.squeeze(-1).bool()].cpu()]
+                    returned_text = [ids[mask.squeeze(-1).bool().cpu()]]
 
                 return (D, doclens, *returned_text)
 
