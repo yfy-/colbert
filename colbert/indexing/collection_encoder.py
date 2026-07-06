@@ -216,7 +216,9 @@ class CollectionEncoder:
         tokens: torch.Tensor,
         lowest_idfs: torch.Tensor,
     ):
-        return embs
+        _ = pid
+        keep_mask = torch.isin(tokens, lowest_idfs, invert=True)
+        return embs[keep_mask]
 
     @classmethod
     def _dominance_probs(
@@ -334,7 +336,7 @@ class CollectionEncoder:
         self,
         embs: torch.Tensor,
         doclens: List[int],
-        tokens: List[int],
+        tokens: torch.Tensor,
         pids: List[int],
         **prune_kwargs,
     ) -> Tuple[torch.Tensor, List[int]]:
@@ -344,16 +346,16 @@ class CollectionEncoder:
         for (
             pid,
             dlen,
-            dtokens,
         ) in tqdm(
-            iterable=zip(pids, doclens, tokens),
+            iterable=zip(pids, doclens),
             total=len(pids),
             desc="Static pruning",
         ):
             d_embs = embs[offset : offset + dlen]
+            d_toks = tokens[offset: offest + dlen]
             if self.use_gpu:
                 d_embs = d_embs.to("cuda")
-                tokens = tokens.to("cuda")
+                d_toks = d_toks.to("cuda")
 
             offset += dlen
             pd_embs = self.static_prune_func(
@@ -404,7 +406,7 @@ class CollectionEncoder:
             ):
                 embs = torch.load(embs_path)
                 doclens = torch.load(dlens_path)
-                tokens = torch.load(tokens(path))
+                tokens = torch.load(tokens_path)
             else:
                 embs, doclens, tokens = [], [], []
 
