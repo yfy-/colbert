@@ -422,9 +422,10 @@ class CollectionEncoder:
                     )
                     embs.append(embs_)
                     doclens.extend(doclens_)
-                    tokens.extend(tokens_)
+                    tokens.append(tokens_)
 
                 embs = torch.cat(embs)
+                tokens = torch.cat(tokens)
                 if use_cache:
                     self.cache_path.mkdir(parents=True, exist_ok=True)
                     torch.save(embs, embs_path)
