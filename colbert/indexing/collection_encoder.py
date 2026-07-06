@@ -352,14 +352,14 @@ class CollectionEncoder:
             desc="Static pruning",
         ):
             d_embs = embs[offset : offset + dlen]
-            d_toks = tokens[offset: offest + dlen]
+            d_toks = tokens[offset: offset + dlen]
             if self.use_gpu:
                 d_embs = d_embs.to("cuda")
                 d_toks = d_toks.to("cuda")
 
             offset += dlen
             pd_embs = self.static_prune_func(
-                pid, d_embs, dtokens, **prune_kwargs
+                pid, d_embs, d_toks, **prune_kwargs
             )
             # Always accumulate in CPU because most likely GPU mem
             # is not enough.
