@@ -143,7 +143,7 @@ class IndexScorer(IndexLoader, CandidateGeneration):
         )
         top_idf_mask[:nospec_start] = True
         top_idf_mask[nospec_end] = True
-        return Q[:input_tokens.size(0)][top_idf_mask]
+        return Q[:, :input_tokens.size(0)][:, top_idf_mask]
 
     def retrieve(
         self,
