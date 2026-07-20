@@ -62,11 +62,9 @@ class IndexScorer(IndexLoader, CandidateGeneration):
         self.embeddings_strided = ResidualEmbeddingsStrided(
             self.codec, self.embeddings, self.doclens
         )
-        self.pre_alloc_scores = torch.zeros((self.codec.centroids.shape[0], 32))
-        if use_gpu:
-            self.pre_alloc_scores = self.pre_alloc_scores.to("cuda").half()
 
         self.token_dfs = None
+        pre_alloc_num_cols = 32
         if config.token_dfs_path is not None:
             if config.token_topk <= 0:
                 raise ValueError(
@@ -75,6 +73,12 @@ class IndexScorer(IndexLoader, CandidateGeneration):
 
             print_message(f"Loading token DFs from: {config.token_dfs_path}")
             self.token_dfs = torch.load(config.token_dfs_path)
+            # Number of topk tokens + 3 special tokens
+            pre_alloc_num_cols = config.token_topk + 3
+
+        self.pre_alloc_scores = torch.zeros((self.codec.centroids.shape[0], pre_alloc_num_cols))
+        if use_gpu:
+            self.pre_alloc_scores = self.pre_alloc_scores.to("cuda").half()
 
     @classmethod
     def try_load_torch_extensions(cls, use_gpu):
