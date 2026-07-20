@@ -186,3 +186,5 @@ class SearchSettings:
     filter_pids_maxscore: bool = DefaultVal(None)
     maxscore_quantile: float = DefaultVal(1.0)
     save_centroids: str = DefaultVal(False)
+    token_dfs_path: str = DefaultVal(None)
+    token_topk: int = DefaultVal(0)

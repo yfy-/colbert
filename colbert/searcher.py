@@ -1,8 +1,8 @@
 import json
 import os
 import time
-from typing import Optional, Union
 from pathlib import Path
+from typing import Optional, Union
 
 import torch
 from tqdm import tqdm
@@ -58,19 +58,20 @@ class Searcher:
     def configure(self, **kw_args):
         self.config.configure(**kw_args)
 
-    def encode(self, text: TextQueries, full_length_search=False):
+    def encode(
+        self, text: TextQueries, full_length_search=False, ret_tokens=False
+    ):
         queries = text if type(text) is list else [text]
         bsize = 128 if len(queries) > 128 else None
 
         self.checkpoint.query_tokenizer.query_maxlen = self.config.query_maxlen
-        Q = self.checkpoint.queryFromText(
+        return self.checkpoint.queryFromText(
             queries,
             bsize=bsize,
             to_cpu=True,
             full_length_search=full_length_search,
+            ret_tokens=ret_tokens,
         )
-
-        return Q
 
     def search(self, text: str, k=10, filter_fn=None, full_length_search=False):
         Q = self.encode(text, full_length_search=full_length_search)
@@ -86,9 +87,13 @@ class Searcher:
         queries = Queries.cast(queries)
         queries_ = list(queries.values())
 
-        Q = self.encode(queries_, full_length_search=full_length_search)
+        Q, input_ids, attention_masks = self.encode(
+            queries_, full_length_search=full_length_search, ret_tokens=True
+        )
 
-        return self._search_all_Q(queries, Q, k, filter_fn=filter_fn)
+        return self._search_all_Q(
+            queries, Q, input_ids, attention_masks, k, filter_fn=filter_fn
+        )
 
     def search_all_timed(
         self,
@@ -103,22 +108,35 @@ class Searcher:
         queries = Queries.cast(queries)
         queries_ = list(queries.values())
 
-        Q = None
+        Q, input_ids, attention_masks = None, None, None
         if query_cache_path is not None and query_cache_path.exists():
             print_message(f"Loading cached Q from: {query_cache_path}")
-            Q = torch.load(query_cache_path)
+
+            Q, input_ids, attention_masks = (
+                torch.load(query_cache_path / "encoded.pt"),
+                torch.load(query_cache_path / "input_ids.pt"),
+                torch.load(query_cache_path / "attention_masks.pt"),
+            )
 
         if Q is None:
             print_message("Encoding queries..")
-            Q = self.encode(queries_, full_length_search=full_length_search)
+            Q, input_ids, attention_masks = self.encode(
+                queries_,
+                full_length_search=full_length_search,
+                ret_tokens=True,
+            )
 
         if query_cache_path is not None and not query_cache_path.exists():
             print_message(f"Caching Q to cache file at: {query_cache_path}")
-            torch.save(Q, query_cache_path)
+            torch.save(Q, query_cache_path / "encoded.pt")
+            torch.save(input_ids, query_cache_path / "input_ids.pt")
+            torch.save(input_ids, query_cache_path / "attention_masks.pt")
 
         return self._search_all_Q_timed(
             queries,
             Q,
+            input_ids,
+            attention_masks,
             k,
             num_run,
             filter_fn=filter_fn,
@@ -129,6 +147,8 @@ class Searcher:
         self,
         queries,
         Q,
+        input_ids,
+        attention_masks,
         k,
         num_run,
         filter_fn=None,
@@ -157,6 +177,9 @@ class Searcher:
                     search_start = time.time()
                     pids, ranks, scores = self.dense_search(
                         Q[query_idx : query_idx + 1],
+                        input_ids[query_idx : query_idx + 1][
+                            attention_masks[query_idx : query_idx + 1] == 1
+                        ],
                         k=k,
                         filter_fn=filter_fn,
                         sparse_query=sparse_q,
@@ -207,7 +230,9 @@ class Searcher:
 
         return torch.concat(triplets, dim=0)
 
-    def _search_all_Q(self, queries, Q, k, filter_fn=None):
+    def _search_all_Q(
+        self, queries, Q, input_ids, attention_masks, k, filter_fn=None
+    ):
         qids = list(queries.keys())
         search_start = time.time()
         all_scored_pids = [
@@ -251,6 +276,7 @@ class Searcher:
     def dense_search(
         self,
         Q: torch.Tensor,
+        input_tokens: torch.Tensor,
         k=10,
         filter_fn=None,
         sparse_query: SparseQuery = None,
@@ -278,7 +304,7 @@ class Searcher:
                 self.configure(ndocs=max(k * 4, 4096))
 
         pids, scores = self.ranker.rank(
-            self.config, Q, filter_fn=filter_fn, sparse_query=sparse_query
+            self.config, Q, input_tokens, filter_fn=filter_fn, sparse_query=sparse_query
         )
 
         return pids[:k], list(range(1, k + 1)), scores[:k]

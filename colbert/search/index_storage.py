@@ -66,6 +66,16 @@ class IndexScorer(IndexLoader, CandidateGeneration):
         if use_gpu:
             self.pre_alloc_scores = self.pre_alloc_scores.to("cuda").half()
 
+        self.token_dfs = None
+        if config.token_dfs_path is not None:
+            if config.token_topk <= 0:
+                raise ValueError(
+                    f"token pruning requirest at least 1 token, given: {config.token_topk}"
+                )
+
+            print_message(f"Loading token DFs from: {config.token_dfs_path}")
+            self.token_dfs = torch.load(config.token_dfs_path)
+
     @classmethod
     def try_load_torch_extensions(cls, use_gpu):
         if hasattr(cls, "loaded_extensions") or use_gpu:
@@ -117,7 +127,30 @@ class IndexScorer(IndexLoader, CandidateGeneration):
     def lookup_pids(self, passage_ids, out_device="cuda", return_mask=False):
         return self.embeddings_strided.lookup_pids(passage_ids, out_device)
 
-    def retrieve(self, config, Q, sparse_query: Optional[SparseQuery] = None):
+    def token_prune(self, Q: torch.Tensor, input_tokens: torch.Tensor) -> torch.Tensor:
+        nospec_start, nospec_end = 2, -1
+
+        # Not enough tokens to prune
+        if input_tokens.size(0) + nospec_end - nospec_start <= self.config.token_topk:
+            return Q[:input_tokens.size(0)]
+
+        nospec_dfs = self.token_dfs[input_tokens[nospec_start:nospec_end]]
+        _, top_idf_idxs = torch.topk(nospec_dfs, self.config.token_topk, largest=False)
+        top_idf_mask = torch.isin(torch.arange(input_tokens.size(0)), top_idf_idxs + nospec_start)
+        top_idf_mask[:nospec_start] = True
+        top_idf_mask[nospec_end] = True
+        return Q[input_tokens.size(0)][top_idf_mask]
+
+    def retrieve(
+        self,
+        config,
+        Q,
+        input_tokens,
+        sparse_query: Optional[SparseQuery] = None,
+    ):
+        if self.token_dfs is not None:
+            Q = self.token_prune(Q, input_tokens)
+
         Q = Q[
             :, : config.query_maxlen
         ]  # NOTE: Candidate generation uses only the query tokens
@@ -176,12 +209,13 @@ class IndexScorer(IndexLoader, CandidateGeneration):
         self,
         config,
         Q,
+        input_tokens,
         filter_fn=None,
         sparse_query: Optional[SparseQuery] = None,
     ):
         with torch.inference_mode():
             pids, centroid_scores, term_ub_scores = self.retrieve(
-                config, Q, sparse_query=sparse_query
+                config, Q, input_tokens, sparse_query=sparse_query
             )
 
             if filter_fn is not None:
