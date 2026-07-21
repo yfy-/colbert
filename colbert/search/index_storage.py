@@ -64,7 +64,7 @@ class IndexScorer(IndexLoader, CandidateGeneration):
         )
 
         self.token_dfs = None
-        pre_alloc_num_cols = 32
+        self.query_token_size = 32
         if config.token_dfs_path is not None:
             if config.token_topk <= 0:
                 raise ValueError(
@@ -74,9 +74,9 @@ class IndexScorer(IndexLoader, CandidateGeneration):
             print_message(f"Loading token DFs from: {config.token_dfs_path}")
             self.token_dfs = torch.load(config.token_dfs_path)
             # Number of topk tokens + 3 special tokens
-            pre_alloc_num_cols = config.token_topk + 3
+            self.query_token_size = config.token_topk + 3
 
-        self.pre_alloc_scores = torch.zeros((self.codec.centroids.shape[0], pre_alloc_num_cols))
+        self.pre_alloc_scores = torch.zeros((self.codec.centroids.shape[0], self.query_token_size))
         if use_gpu:
             self.pre_alloc_scores = self.pre_alloc_scores.to("cuda").half()
 
@@ -138,7 +138,7 @@ class IndexScorer(IndexLoader, CandidateGeneration):
 
         # Not enough tokens to prune
         if input_tokens.size(0) + nospec_end - nospec_start <= token_topk:
-            return Q[: input_tokens.size(0)]
+            return Q[:, : self.query_token_size]
 
         nospec_dfs = self.token_dfs[input_tokens[nospec_start:nospec_end]]
         _, top_idf_idxs = torch.topk(nospec_dfs, token_topk, largest=False)
