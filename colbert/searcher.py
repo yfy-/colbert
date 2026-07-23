@@ -128,6 +128,7 @@ class Searcher:
 
         if query_cache_path is not None and not query_cache_path.exists():
             print_message(f"Caching Q to cache file at: {query_cache_path}")
+            query_cache_path.mkdir(parents=True)
             torch.save(Q, query_cache_path / "encoded.pt")
             torch.save(input_ids, query_cache_path / "input_ids.pt")
             torch.save(input_ids, query_cache_path / "attention_masks.pt")
