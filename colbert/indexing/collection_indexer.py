@@ -155,7 +155,7 @@ class CollectionIndexer:
                 Run().print_main(
                     f"Saving sampled_pids to cache: {sp_cache_path}"
                 )
-                sp_cache_path.mkdir(parents=True, exist_ok=True)
+                self.cache_path.mkdir(parents=True, exist_ok=True)
                 torch.save(sampled_pids, sp_cache_path)
 
         Run().print_main(
