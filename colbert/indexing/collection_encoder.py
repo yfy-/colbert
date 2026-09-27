@@ -353,7 +353,7 @@ class CollectionEncoder:
         pruned_embs = torch.from_numpy(pruned_embs)
 
         final_embs = torch.empty(
-            len(doclens) * 2 + pruned_embs.shape[0], dtype=embs.dtype
+            (len(doclens) * 2 + pruned_embs.shape[0], pruned_embs.shape[1]), dtype=embs.dtype
         )
         final_doclens = []
         offset = 0
