@@ -6,6 +6,7 @@ import random
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+import embpurisma
 import numpy as np
 import torch
 import torch.nn.functional as torch_f
@@ -20,6 +21,7 @@ from colbert.utils.utils import batch, print_message
 class CollectionEncoder:
 
     static_prune_query_methods = {"dominant", "dominant_repair", "gas"}
+    static_prune_batch_methods = {"gdmis_rs"}
 
     def __init__(self, config, checkpoint):
         self.config = config
@@ -34,6 +36,7 @@ class CollectionEncoder:
             "dominant_repair": self.dominant_repair_pruning,
             "first": self.first_pruning,
             "gdmis": self.gdmis_pruning,
+            "gdmis_rs": self.gdmis_rs_pruning,
             "similar": self.similar_pruning,
             "gas": self.gas,
             "idf": self.idf_pruning,
@@ -170,7 +173,6 @@ class CollectionEncoder:
         _, _ = pid, tokens
         return self._similar_keep(embs, keep_ratio=keep_ratio, keep_top=False)
 
-    # TODO: Benchmark greedy mvc between jgrapht, PyTorch and cpp.
     def gdmis_pruning(
         self,
         pid: int,
@@ -332,7 +334,47 @@ class CollectionEncoder:
 
         return kept_embs
 
-    def static_prune(
+    def gdmis_rs_pruning(
+        self, embs: torch.Tensor, doclens: List[int], edge_threshold=0.8
+    ):
+        embs = embs.to("cpu")
+        len_cumsum = np.cumsum([0] + doclens)
+        keep_mask = torch.ones(len_cumsum[-1], dtype=bool)
+        gdmis_doclens = []
+        for offset, dlen in zip(len_cumsum[:-1], doclens):
+            keep_mask[offset : offset + 2] = False
+            gdmis_doclens.append(dlen - 2)
+
+        pruned_embs, pruned_doclens = embpurisma.gdmis_batch(
+            embs[keep_mask].detach().cpu().numpy(),
+            gdmis_doclens,
+            edge_threshold,
+        )
+        pruned_embs = torch.from_numpy(pruned_embs)
+
+        final_embs = torch.empty(
+            len(doclens) * 2 + pruned_embs.shape[0], dtype=embs.dtype
+        )
+        final_doclens = []
+        offset = 0
+        p_offset = 0
+        for i, dlen, p_dlen in enumerate(zip(doclens, pruned_doclens)):
+            f_offset = p_offset + i * 2
+            final_embs[f_offset : f_offset + 2] = embs[offset : offset + 2]
+
+            final_embs[f_offset + 2 : f_offset + 2 + p_dlen] = pruned_embs[
+                p_offset : p_offset + p_dlen
+            ]
+            final_doclens.append(p_dlen + 2)
+            offset += dlen
+            p_offset += p_dlen
+
+        if self.use_gpu:
+            final_embs = final_embs.to("cuda")
+
+        return final_embs, final_doclens
+
+    def static_prune_iterative(
         self,
         embs: torch.Tensor,
         doclens: List[int],
@@ -352,7 +394,7 @@ class CollectionEncoder:
             desc="Static pruning",
         ):
             d_embs = embs[offset : offset + dlen]
-            d_toks = tokens[offset: offset + dlen]
+            d_toks = tokens[offset : offset + dlen]
             if self.use_gpu:
                 d_embs = d_embs.to("cuda")
                 d_toks = d_toks.to("cuda")
@@ -440,7 +482,12 @@ class CollectionEncoder:
                 f"method '{self.config.static_pruning_method}'."
             )
 
-            return self.static_prune(
+            if self.static_prune_func in self.static_prune_batch_methods:
+                return self.static_prune_func(
+                    embs, doclens, **self.static_pruning_kwargs
+                )
+
+            return self.static_prune_iterative(
                 embs, doclens, tokens, pids, **self.static_pruning_kwargs
             )
 
