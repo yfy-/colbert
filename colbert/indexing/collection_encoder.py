@@ -36,7 +36,7 @@ class CollectionEncoder:
             "dominant_repair": self.dominant_repair_pruning,
             "first": self.first_pruning,
             "gdmis": self.gdmis_pruning,
-            "gdmis_rs": self.gdmis_rs_pruning,
+            "gdmis-rs": self.gdmis_rs_pruning,
             "similar": self.similar_pruning,
             "gas": self.gas,
             "idf": self.idf_pruning,
