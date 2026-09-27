@@ -482,7 +482,7 @@ class CollectionEncoder:
                 f"method '{self.config.static_pruning_method}'."
             )
 
-            if self.static_prune_func in self.static_prune_batch_methods:
+            if self.config.static_pruning_method in self.static_prune_batch_methods:
                 return self.static_prune_func(
                     embs, doclens, **self.static_pruning_kwargs
                 )
