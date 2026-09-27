@@ -151,6 +151,11 @@ class CollectionIndexer:
             # sampled_pids = int(2 ** np.floor(np.log2(1 + sampled_pids)))
             sampled_pids = min(1 + int(sampled_pids), num_passages)
             sampled_pids = random.sample(range(num_passages), sampled_pids)
+            if use_cache:
+                Run().print_main(
+                    f"Saving sampled_pids to cache: {sp_cache_path}"
+                )
+                torch.save(sampled_pids, sp_cache_path)
 
         Run().print_main(
             f"# of sampled PIDs = {len(sampled_pids)} \t sampled_pids[:3] = {sampled_pids[:3]}"
