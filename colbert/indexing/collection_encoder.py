@@ -358,7 +358,7 @@ class CollectionEncoder:
         final_doclens = []
         offset = 0
         p_offset = 0
-        for i, dlen, p_dlen in enumerate(zip(doclens, pruned_doclens)):
+        for i, (dlen, p_dlen) in enumerate(zip(doclens, pruned_doclens)):
             f_offset = p_offset + i * 2
             final_embs[f_offset : f_offset + 2] = embs[offset : offset + 2]
 
