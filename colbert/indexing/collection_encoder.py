@@ -346,7 +346,7 @@ class CollectionEncoder:
             gdmis_doclens.append(dlen - 2)
 
         pruned_embs, pruned_doclens = embpurisma.gdmis_batch(
-            embs[keep_mask].detach().cpu().numpy(),
+            embs[keep_mask].detach().cpu().numpy().astype(np.float64),
             gdmis_doclens,
             edge_threshold,
         )
@@ -416,7 +416,7 @@ class CollectionEncoder:
     def encode_passages(
         self,
         passages: List[str],
-        chunk_idx: Optional[int] = None,
+        cache_key: Optional[str] = None,
         pids: Optional[List[int]] = None,
     ):
         Run().print(f"#> Encoding {len(passages)} passages..")
@@ -427,15 +427,15 @@ class CollectionEncoder:
         if self.static_prune_func is not None and pids is None:
             raise ValueError("Static pruning cannot run without pids!")
 
-        use_cache = self.cache_path is not None and chunk_idx is not None
+        use_cache = self.cache_path is not None and cache_key is not None
         embs_path = (
-            self.cache_path / f"embs_{chunk_idx}.pt" if use_cache else None
+            self.cache_path / f"embs_{cache_key}.pt" if use_cache else None
         )
         dlens_path = (
-            self.cache_path / f"dlens_{chunk_idx}.pt" if use_cache else None
+            self.cache_path / f"dlens_{cache_key}.pt" if use_cache else None
         )
         tokens_path = (
-            self.cache_path / f"tokens_{chunk_idx}.pt" if use_cache else None
+            self.cache_path / f"tokens_{cache_key}.pt" if use_cache else None
         )
         with torch.inference_mode():
             if (

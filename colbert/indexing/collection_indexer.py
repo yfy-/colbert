@@ -13,6 +13,8 @@ try:
 except ImportError as e:
     print("WARNING: faiss must be imported for indexing")
 
+from pathlib import Path
+
 import numpy as np
 import torch.multiprocessing as mp
 
@@ -58,6 +60,9 @@ class CollectionIndexer:
 
         self.encoder = CollectionEncoder(config, self.checkpoint)
         self.saver = IndexSaver(config)
+        self.cache_path = None
+        if self.config.encode_cache_path is not None:
+            self.cache_path = Path(self.config.encode_cache_path)
 
         print_memory_stats(f"RANK:{self.rank}")
 
@@ -124,21 +129,29 @@ class CollectionIndexer:
         self._save_plan()
 
     def _sample_pids(self):
-        num_passages = len(self.collection)
+        use_cache = self.cache_path is not None
+        sp_cache_path = self.cache_path / "sampled_pids.pt"
+        if use_cache and self.cache_path.exists():
+            Run().print_main(
+                f"Loading sampled_pids from cache: {sp_cache_path}"
+            )
+            sampled_pids = torch.load(sp_cache_path)
+        else:
+            num_passages = len(self.collection)
 
-        # Simple alternative: < 100k: 100%, < 1M: 15%, < 10M: 7%, < 100M: 3%, > 100M: 1%
-        # Keep in mind that, say, 15% still means at least 100k.
-        # So the formula is max(100% * min(total, 100k), 15% * min(total, 1M), ...)
-        # Then we subsample the vectors to 100 * num_partitions
+            # Simple alternative: < 100k: 100%, < 1M: 15%, < 10M: 7%, < 100M: 3%, > 100M: 1%
+            # Keep in mind that, say, 15% still means at least 100k.
+            # So the formula is max(100% * min(total, 100k), 15% * min(total, 1M), ...)
+            # Then we subsample the vectors to 100 * num_partitions
 
-        typical_doclen = (
-            120  # let's keep sampling independent of the actual doc_maxlen
-        )
-        sampled_pids = 16 * np.sqrt(typical_doclen * num_passages)
-        # sampled_pids = int(2 ** np.floor(np.log2(1 + sampled_pids)))
-        sampled_pids = min(1 + int(sampled_pids), num_passages)
+            typical_doclen = (
+                120  # let's keep sampling independent of the actual doc_maxlen
+            )
+            sampled_pids = 16 * np.sqrt(typical_doclen * num_passages)
+            # sampled_pids = int(2 ** np.floor(np.log2(1 + sampled_pids)))
+            sampled_pids = min(1 + int(sampled_pids), num_passages)
+            sampled_pids = random.sample(range(num_passages), sampled_pids)
 
-        sampled_pids = random.sample(range(num_passages), sampled_pids)
         Run().print_main(
             f"# of sampled PIDs = {len(sampled_pids)} \t sampled_pids[:3] = {sampled_pids[:3]}"
         )
@@ -152,7 +165,7 @@ class CollectionIndexer:
         ]
 
         local_sample_embs, doclens = self.encoder.encode_passages(
-            local_sample, pids=list(sampled_pids)
+            local_sample, pids=list(sampled_pids), cache_key="sample"
         )
 
         if torch.cuda.is_available():
@@ -429,12 +442,10 @@ class CollectionIndexer:
                     )
                     continue
                 # Encode passages into embeddings with the checkpoint model
-                Run().print_main(
-                        f"#> Encoding offset: {offset}."
-                    )
+                Run().print_main(f"#> Encoding offset: {offset}.")
                 embs, doclens = self.encoder.encode_passages(
                     passages,
-                    chunk_idx=chunk_idx,
+                    cache_key=str(chunk_idx),
                     pids=list(range(offset, offset + len(passages))),
                 )
                 if self.use_gpu:
