@@ -131,7 +131,7 @@ class CollectionIndexer:
     def _sample_pids(self):
         use_cache = self.cache_path is not None
         sp_cache_path = self.cache_path / "sampled_pids.pt"
-        if use_cache and self.cache_path.exists():
+        if use_cache and sp_cache_path.exists():
             Run().print_main(
                 f"Loading sampled_pids from cache: {sp_cache_path}"
             )
@@ -155,6 +155,7 @@ class CollectionIndexer:
                 Run().print_main(
                     f"Saving sampled_pids to cache: {sp_cache_path}"
                 )
+                sp_cache_path.mkdir(parents=True, exist_ok=True)
                 torch.save(sampled_pids, sp_cache_path)
 
         Run().print_main(
