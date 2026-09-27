@@ -21,7 +21,7 @@ from colbert.utils.utils import batch, print_message
 class CollectionEncoder:
 
     static_prune_query_methods = {"dominant", "dominant_repair", "gas"}
-    static_prune_batch_methods = {"gdmis_rs"}
+    static_prune_batch_methods = {"gdmis-rs"}
 
     def __init__(self, config, checkpoint):
         self.config = config
