@@ -1,197 +1,80 @@
-## 🚨 **Announcements** 
+# ColBERT (fork)
 
-* (1/29/23) We have merged a new index updater feature and support for additional Hugging Face models! These are in beta so please give us feedback as you try them out.
-* (1/24/23) If you're looking for the **DSP** framework for composing ColBERTv2 and LLMs, it's at: https://github.com/stanfordnlp/dsp
+A research fork of ColBERTv2/PLAID with the code of the works below. The options they add are in
+`colbert/infra/config/settings.py`.
 
-[<img align="center" src="https://colab.research.google.com/assets/colab-badge.svg" />](https://colab.research.google.com/github/stanford-futuredata/ColBERT/blob/main/docs/intro2new.ipynb)
+## Sparcent
 
-# ColBERT (v2)
+[Sparcent: faster multi-vector dense retrieval with sparse centroid indices](https://doi.org/10.1007/s10115-026-02907-x)
+(Knowledge and Information Systems, 2026). Setup, command line tools and the paper's experiments
+are in the [sparcent](https://github.com/yfy-/sparcent) repository.
 
-### ColBERT is a _fast_ and _accurate_ retrieval model, enabling scalable BERT-based search over large text collections in tens of milliseconds.
+- **Index building** (`colbert/sparcent/`). With `ColBERTConfig(sparcent=True)` the `Indexer`
+  builds, after the ColBERT index, a sparse centroid index in `<index>/sparcent/`: the passages
+  of each centroid are ordered (`sparcent_sample_method`: `count`, `similar` or `mean_similar`),
+  the SPLADE vectors of the first `sparcent_nearest_percent` of them are averaged and pruned to
+  an L1 submass (`sparcent_pruning_submass`), then indexed by PISA, reordered by recursive graph
+  bisection (`sparcent_bp_depth`) and converted to a BMP index (`centroids.bmp`).
+- **Search.** `Searcher(..., config=ColBERTConfig(sparcent=True, ...))` retrieves
+  `sparcent_k_score` centroids with BMP (`sparcent_alpha`, `sparcent_beta`) and re-ranks the
+  first `sparcent_k_rerank` with dense scores instead of scoring all centroids. Queries are
+  encoded with both ColBERT and SPLADE (the model used at indexing).
 
+## Static pruning
 
-<p align="center">
-  <img align="center" src="docs/images/ColBERT-Framework-MaxSim-W370px.png" />
-</p>
-<p align="center">
-  <b>Figure 1:</b> ColBERT's late interaction, efficiently scoring the fine-grained similarity between a queries and a passage.
-</p>
+Ongoing work, not yet published: static pruning of document token embeddings at indexing time
+(`static_pruning_method`, `static_pruning_kwargs`; the methods are in
+`colbert/indexing/collection_encoder.py`), including methods that use a query log.
 
-As Figure 1 illustrates, ColBERT relies on fine-grained **contextual late interaction**: it encodes each passage into a **matrix** of token-level embeddings (shown above in blue). Then at search time, it embeds every query into another matrix (shown in green) and efficiently finds passages that contextually match the query using scalable vector-similarity (`MaxSim`) operators.
+## Other additions
 
-These rich interactions allow ColBERT to surpass the quality of _single-vector_ representation models, while scaling efficiently to large corpora. You can read more in our papers:
-
-* [**ColBERT: Efficient and Effective Passage Search via Contextualized Late Interaction over BERT**](https://arxiv.org/abs/2004.12832) (SIGIR'20).
-* [**Relevance-guided Supervision for OpenQA with ColBERT**](https://arxiv.org/abs/2007.00814) (TACL'21).
-* [**Baleen: Robust Multi-Hop Reasoning at Scale via Condensed Retrieval**](https://arxiv.org/abs/2101.00436) (NeurIPS'21).
-* [**ColBERTv2: Effective and Efficient Retrieval via Lightweight Late Interaction**](https://arxiv.org/abs/2112.01488) (NAACL'22).
-* [**PLAID: An Efficient Engine for Late Interaction Retrieval**](https://arxiv.org/abs/2205.09707) (CIKM'22).
-
-----
-
-## ColBERTv1
-
-The ColBERTv1 code from the SIGIR'20 paper is in the [`colbertv1` branch](https://github.com/stanford-futuredata/ColBERT/tree/colbertv1). See [here](#branches) for more information on other branches.
-
+- **Latency measurement.** `Searcher.search_all_timed(queries, k, num_run)` runs each query
+  `num_run` times and reports mean/p50/p95/p99 of the per-query minimum latency (log and
+  ranking `.meta`). The `gpus` setting is respected, e.g. `RunConfig(gpus=0)` for CPU search.
+- **Experiment options:** sparse-then-dense retrieval (`sparse_then_dense=True` with a
+  full-collection SPLADE BMP `sparcent_index`), IDF query token pruning (`token_dfs_path`,
+  `token_topk`), MaxScore filtering (`filter_pids_maxscore`), embedding and query caches
+  (`encode_cache_path`, `query_cache_path`).
+- `utility/evaluate/msmarco_passages.py` also reports NDCG@10 and Recall@10/100 and reads TREC
+  runs; `utility/evaluate/lotte_evaluate.py` evaluates LoTTE. `scripts/` holds one-off
+  experiment scripts (not maintained).
 
 ## Installation
 
-ColBERT requires Python 3.7+ and Pytorch 1.9+ and uses the [Hugging Face Transformers](https://github.com/huggingface/transformers) library.
-
-We strongly recommend creating a conda environment using the commands below. (If you don't have conda, follow the official [conda installation guide](https://docs.anaconda.com/anaconda/install/linux/#installation).)
-
-We have also included a new environment file specifically for CPU-only environments (`conda_env_cpu.yml`), but note that if you are testing CPU execution on a machine that includes GPUs you might need to specify `CUDA_VISIBLE_DEVICES=""` as part of your command. Note that a GPU is required for training and indexing.
-
-```
-conda env create -f conda_env[_cpu].yml
-conda activate colbert
+```bash
+pip install -e ".[sparcent]"   # without [sparcent] for plain ColBERT/PLAID
 ```
 
-If you face any problems, please [open a new issue](https://github.com/stanford-futuredata/ColBERT/issues) and we'll help you promptly!
+The `sparcent` extra installs the [splade](https://github.com/yfy-/splade) and
+[BMP](https://github.com/yfy-/BMP) forks (BMP's Python bindings are built with Rust). Building a
+Sparcent index also needs the PISA tools (`parse_collection`, `invert`, `reorder-docids`,
+`lexicon`) and ciff's `pisa2ciff` on `PATH` (or in `sparcent_pisa_bin_dir`). The sparcent
+repository's `setup.sh` sets all of them up with the versions used for the paper.
 
+## Sparcent usage
 
+```python
+from colbert import Indexer, Searcher
+from colbert.infra import ColBERTConfig, Run, RunConfig
 
-## Overview
+with Run().context(RunConfig(nranks=1, experiment="msmarco")):
+    config = ColBERTConfig(nbits=2, sparcent=True, sparcent_nearest_percent=0.01,
+                           sparcent_pruning_submass=0.05, sparcent_bp_depth=13)
+    Indexer(checkpoint="colbert-ir/colbertv2.0", config=config).index(
+        name="msmarco.nbits=2", collection="collection.tsv")
 
-Using ColBERT on a dataset typically involves the following steps.
-
-**Step 0: Preprocess your collection.** At its simplest, ColBERT works with tab-separated (TSV) files: a file (e.g., `collection.tsv`) will contain all passages and another (e.g., `queries.tsv`) will contain a set of queries for searching the collection.
-
-**Step 1: Download the [pre-trained ColBERTv2 checkpoint](https://downloads.cs.stanford.edu/nlp/data/colbert/colbertv2/colbertv2.0.tar.gz).** This checkpoint has been trained on the MS MARCO Passage Ranking task. You can also _optionally_ [train your own ColBERT model](#training).
-
-**Step 2: Index your collection.** Once you have a trained ColBERT model, you need to [index your collection](#indexing) to permit fast retrieval. This step encodes all passages into matrices, stores them on disk, and builds data structures for efficient search.
-
-**Step 3: Search the collection with your queries.** Given the model and index, you can [issue queries over the collection](#retrieval) to retrieve the top-k passages for each query.
-
-Below, we illustrate these steps via an example run on the MS MARCO Passage Ranking task.
-
-
-## API Usage Notebook
-
-**NEW**: We have an experimental notebook on [Google Colab](https://colab.research.google.com/github/stanford-futuredata/ColBERT/blob/main/docs/intro2new.ipynb) that you can use with free GPUs. Indexing 10,000 on the free Colab T4 GPU takes six minutes.
-
-This Jupyter notebook **[docs/intro.ipynb notebook](docs/intro.ipynb)** illustrates using the key features of ColBERT with the new Python API.
-
-It includes how to download the ColBERTv2 model checkpoint trained on MS MARCO Passage Ranking and how to download our new LoTTE benchmark.
-
-
-## Data
-
-This repository works directly with a simple **tab-separated file** format to store queries, passages, and top-k ranked lists.
-
-
-* Queries: each line is `qid \t query text`.
-* Collection: each line is `pid \t passage text`.
-* Top-k Ranking: each line is `qid \t pid \t rank`.
-
-This works directly with the data format of the [MS MARCO Passage Ranking](https://github.com/microsoft/MSMARCO-Passage-Ranking) dataset. You will need the training triples (`triples.train.small.tar.gz`), the official top-1000 ranked lists for the dev set queries (`top1000.dev`), and the dev set relevant passages (`qrels.dev.small.tsv`). For indexing the full collection, you will also need the list of passages (`collection.tar.gz`).
-
-
-## Indexing
-
-For fast retrieval, indexing precomputes the ColBERT representations of passages.
-
-Example usage:
-
-```
-from colbert.infra import Run, RunConfig, ColBERTConfig
-from colbert import Indexer
-
-if __name__=='__main__':
-    with Run().context(RunConfig(nranks=1, experiment="msmarco")):
-
-        config = ColBERTConfig(
-            nbits=2,
-            root="/path/to/experiments",
-        )
-        indexer = Indexer(checkpoint="/path/to/checkpoint", config=config)
-        indexer.index(name="msmarco.nbits=2", collection="/path/to/MSMARCO/collection.tsv")
+with Run().context(RunConfig(nranks=1, experiment="msmarco", gpus=0)):
+    searcher = Searcher(index="msmarco.nbits=2", config=ColBERTConfig(
+        sparcent=True, sparcent_k_score=5000, sparcent_k_rerank=3000,
+        sparcent_alpha=0.85, sparcent_beta=0.9))
+    ranking = searcher.search_all_timed("queries.dev.small.tsv", k=10, num_run=3)
 ```
 
+## Acknowledgements
 
-## Retrieval
-
-We typically recommend that you use ColBERT for **end-to-end** retrieval, where it directly finds its top-k passages from the full collection:
-
-```
-from colbert.data import Queries
-from colbert.infra import Run, RunConfig, ColBERTConfig
-from colbert import Searcher
-
-if __name__=='__main__':
-    with Run().context(RunConfig(nranks=1, experiment="msmarco")):
-
-        config = ColBERTConfig(
-            root="/path/to/experiments",
-        )
-        searcher = Searcher(index="msmarco.nbits=2", config=config)
-        queries = Queries("/path/to/MSMARCO/queries.dev.small.tsv")
-        ranking = searcher.search_all(queries, k=100)
-        ranking.save("msmarco.nbits=2.ranking.tsv")
-```
-
-You can optionally specify the `ncells`, `centroid_score_threshold`, and `ndocs` search hyperparameters to trade off between speed and result quality. Defaults for different values of `k` are listed in colbert/searcher.py.
-
-We can evaluate the MSMARCO rankings using the following command:
-
-```
-python -m utility.evaluate.msmarco_passages --ranking "/path/to/msmarco.nbits=2.ranking.tsv" --qrels "/path/to/MSMARCO/qrels.dev.small.tsv"
-```
-
-## Training
-
-We provide a [pre-trained model checkpoint](https://downloads.cs.stanford.edu/nlp/data/colbert/colbertv2/colbertv2.0.tar.gz), but we also detail how to train from scratch here.
-Note that this example demonstrates the ColBERTv1 style of training, but the provided checkpoint was trained with ColBERTv2.
-
-Training requires a JSONL triples file with a `[qid, pid+, pid-]` list per line. The query IDs and passage IDs correspond to the specified `queries.tsv` and `collection.tsv` files respectively.
-
-Example usage (training on 4 GPUs):
-
-```
-from colbert.infra import Run, RunConfig, ColBERTConfig
-from colbert import Trainer
-
-if __name__=='__main__':
-    with Run().context(RunConfig(nranks=4, experiment="msmarco")):
-
-        config = ColBERTConfig(
-            bsize=32,
-            root="/path/to/experiments",
-        )
-        trainer = Trainer(
-            triples="/path/to/MSMARCO/triples.train.small.tsv",
-            queries="/path/to/MSMARCO/queries.train.small.tsv",
-            collection="/path/to/MSMARCO/collection.tsv",
-            config=config,
-        )
-
-        checkpoint_path = trainer.train()
-
-        print(f"Saved checkpoint to {checkpoint_path}...")
-```
-
-## Running a lightweight ColBERTv2 server
-We provide a script to run a lightweight server which serves k (upto 100) results in ranked order for a given search query, in JSON format. This script can be used to power DSP programs. 
-
-To run the server, update the environment variables `INDEX_ROOT` and `INDEX_NAME` in the `.env` file to point to the appropriate ColBERT index. The run the following command:
-```
-python server.py
-```
-
-A sample query:
-```
-http://localhost:8893/api/search?query=Who won the 2022 FIFA world cup&k=25
-```
-
-## Branches
-
-### Supported branches
-
-* [`main`](https://github.com/stanford-futuredata/ColBERT/tree/main): Stable branch with ColBERTv2 + PLAID.
-* [`colbertv1`](https://github.com/stanford-futuredata/ColBERT/tree/colbertv1): Legacy branch for ColBERTv1.
-
-### Deprecated branches
-* [`new_api`](https://github.com/stanford-futuredata/ColBERT/tree/new_api): Base ColBERTv2 implementation.
-* [`cpu_inference`](https://github.com/stanford-futuredata/ColBERT/tree/cpu_inference): ColBERTv2 implementation with CPU search support.
-* [`fast_search`](https://github.com/stanford-futuredata/ColBERT/tree/fast_search): ColBERTv2 implementation with PLAID.
-* [`binarization`](https://github.com/stanford-futuredata/ColBERT/tree/binarization): ColBERT with a baseline binarization-based compression strategy (as opposed to ColBERTv2's residual compression, which we found to be more robust).
+This is a fork of [ColBERT](https://github.com/stanford-futuredata/ColBERT) by the Stanford
+FutureData group; all credit for ColBERT, ColBERTv2 and PLAID goes to its authors. See the
+original repository for documentation, and cite
+[ColBERT](https://arxiv.org/abs/2004.12832) (SIGIR'20),
+[ColBERTv2](https://arxiv.org/abs/2112.01488) (NAACL'22) and
+[PLAID](https://arxiv.org/abs/2205.09707) (CIKM'22).

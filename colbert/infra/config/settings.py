@@ -169,6 +169,28 @@ class IndexingSettings:
     static_pruning_method: str = DefaultVal(None)
     static_pruning_kwargs: dict = DefaultVal(dict())
 
+    # Sparcent: build the sparse centroid index after the ColBERT index. At
+    # search time, `sparcent=True` retrieves centroids from it.
+    sparcent: bool = DefaultVal(False)
+    sparcent_sample_method: str = DefaultVal("count")
+    sparcent_sample_device: str = DefaultVal("cpu")
+    sparcent_sample_jobs: int = DefaultVal(8)
+    sparcent_splade_model: str = DefaultVal(
+        "naver/splade-cocondenser-ensembledistil"
+    )
+    sparcent_splade_lora_dir: str = DefaultVal(None)
+    sparcent_splade_batch_size: int = DefaultVal(100000)
+    sparcent_splade_encode_batch_size: int = DefaultVal(16)
+    sparcent_nearest_percent: float = DefaultVal(0.01)
+    sparcent_pruning_submass: float = DefaultVal(0.05)
+    sparcent_docs_jobs: int = DefaultVal(1)
+    sparcent_bp_depth: int = DefaultVal(13)
+    sparcent_pisa_bin_dir: str = DefaultVal(None)
+    sparcent_pisa_jobs: int = DefaultVal(8)
+    sparcent_pisa_batch_size: int = DefaultVal(32768)
+    sparcent_bmp_block_size: int = DefaultVal(8)
+    sparcent_bmp_compress_range: bool = DefaultVal(True)
+
     @property
     def index_path_(self):
         return self.index_path or os.path.join(self.index_root_, self.index_name)

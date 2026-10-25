@@ -6,7 +6,6 @@ import random
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-import embpurisma
 import numpy as np
 import torch
 import torch.nn.functional as torch_f
@@ -337,6 +336,9 @@ class CollectionEncoder:
     def gdmis_rs_pruning(
         self, embs: torch.Tensor, doclens: List[int], edge_threshold=0.8
     ):
+        # Optional dependency, only needed by this pruning method.
+        import embpurisma
+
         embs = embs.to("cpu")
         len_cumsum = np.cumsum([0] + doclens)
         keep_mask = torch.ones(len_cumsum[-1], dtype=bool)

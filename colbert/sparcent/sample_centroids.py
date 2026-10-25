@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 
+"""Order the passages of each centroid for the Sparcent centroid documents."""
+
 import argparse
 import multiprocessing
 import os.path as osp
 from functools import partial
 from typing import Tuple
 
+import numpy as np
 import torch
 from tqdm import tqdm
 
@@ -13,6 +16,11 @@ from colbert.indexing.codecs.residual_embeddings_strided import \
     ResidualEmbeddingsStrided
 from colbert.infra import ColBERTConfig, Run, RunConfig
 from colbert.search.index_storage import IndexLoader
+
+ORDER_METHODS = ["similar", "count", "mean_similar"]
+
+# Per-process state of the sorting pool, set once by _init_worker.
+_worker = {}
 
 
 def sort_count(
@@ -41,6 +49,10 @@ def sort_count_vectorized(
     code_offsets: torch.Tensor,
 ) -> torch.Tensor:
     pids, centroid_idx = pids_centroid_idx
+    # k-means can leave a centroid without any embedding.
+    if len(pids) == 0:
+        return pids.int()
+
     pids = pids.long()
 
     pids_doclens = doclens[pids]
@@ -63,6 +75,7 @@ def sort_similar(
     pids_centroid_idx: Tuple[torch.Tensor, int],
     device: str,
     centroids: torch.Tensor,
+    embs_strided: ResidualEmbeddingsStrided,
 ) -> torch.Tensor:
     """Sort pids by their similarity to centroid."""
     pids, centroid_idx = pids_centroid_idx
@@ -109,6 +122,7 @@ def sort_mean_similar(
     pids_centroid_idx: Tuple[torch.Tensor, int],
     device: str,
     centroids: torch.Tensor,
+    embs_strided: ResidualEmbeddingsStrided,
 ) -> torch.Tensor:
     """Sort pids by their mean similarity to the centroid."""
     pids, centroid_idx = pids_centroid_idx
@@ -128,13 +142,105 @@ def sort_mean_similar(
     return pids[torch.argsort(scores / pids_lengths.to("cpu"), descending=True)]
 
 
-if __name__ == "__main__":
+def _init_worker(sort_partial, all_pids: torch.Tensor, offsets: torch.Tensor):
+    _worker.update(sort=sort_partial, all_pids=all_pids, offsets=offsets)
+
+
+def _sort_centroid(centroid_idx: int) -> np.ndarray:
+    offsets = _worker["offsets"]
+    pids = _worker["all_pids"][
+        offsets[centroid_idx] : offsets[centroid_idx + 1]
+    ]
+    return _worker["sort"]((pids, centroid_idx)).numpy()
+
+
+def sample_centroids(
+    index_path: str,
+    order_method: str,
+    out_path: str,
+    device: str = "cuda",
+    jobs: int = 8,
+):
+    """Save the passages of each centroid ordered by `order_method`.
+
+    The output is a (num_centroids, max_passages) tensor padded with -1.
+    """
+    loader = IndexLoader(index_path)
+    all_pids = loader.ivf.tensor.to(device)
+    offsets = loader.ivf.offsets.to(device)
+    lengths = loader.ivf.lengths
+    centroids = loader.codec.centroids.to(device)
+    embs_strided = ResidualEmbeddingsStrided(
+        loader.codec, loader.embeddings, loader.doclens
+    )
+    n = len(lengths)
+    if order_method == "similar":
+        sort_partial = partial(
+            sort_similar,
+            device=device,
+            centroids=centroids,
+            embs_strided=embs_strided,
+        )
+    elif order_method == "count":
+        sort_partial = partial(
+            sort_count_vectorized,
+            doclens=loader.doclens,
+            codes=embs_strided.codes,
+            code_offsets=embs_strided.codes_strided.offsets,
+        )
+    elif order_method == "mean_similar":
+        sort_partial = partial(
+            sort_mean_similar,
+            device=device,
+            centroids=centroids,
+            embs_strided=embs_strided,
+        )
+    else:
+        raise ValueError(f"no such method: {order_method}")
+
+    if jobs == 1:
+        rest_args = [
+            (all_pids[offsets[i] : offsets[i + 1]], i) for i in range(n)
+        ]
+        cid_pids = list(
+            tqdm(
+                map(sort_partial, rest_args),
+                total=n,
+                desc=f"Sorting centroid passages by {order_method}",
+            )
+        )
+    else:
+        # Workers get the tensors once and return NumPy arrays: sharing
+        # tensors per centroid exhausts file descriptors and memory maps.
+        with multiprocessing.Pool(
+            jobs,
+            initializer=_init_worker,
+            initargs=(sort_partial, all_pids, offsets),
+        ) as p:
+            cid_pids = [
+                torch.from_numpy(sorted_pids)
+                for sorted_pids in tqdm(
+                    p.imap(_sort_centroid, range(n), chunksize=64),
+                    total=n,
+                    desc=f"Sorting centroid passages by {order_method}",
+                )
+            ]
+
+    torch.save(
+        torch.nn.utils.rnn.pad_sequence(
+            cid_pids, batch_first=True, padding_value=-1.0
+        ),
+        out_path,
+    )
+
+
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("experiment")
     parser.add_argument("index")
     parser.add_argument(
         "order_method",
-        choices=["similar", "count", "mean_similar"],
+        choices=ORDER_METHODS,
         help="Method to output passages in order.",
     )
     parser.add_argument("out_filename", help="Out tensor file name")
@@ -147,65 +253,19 @@ if __name__ == "__main__":
     )
     parser.add_argument("-j", "--jobs", type=int, default=8)
     args = parser.parse_args()
-    device = args.device
     with Run().context(RunConfig(nranks=1)):
         config = ColBERTConfig(experiment=args.experiment)
         index_path = osp.join(
             config.root, config.experiment, "indexes", args.index
         )
-        loader = IndexLoader(index_path)
-        all_pids = loader.ivf.tensor.to(device)
-        offsets = loader.ivf.offsets.to(device)
-        lengths = loader.ivf.lengths
-        centroids = loader.codec.centroids.to(device)
-        embs_strided = ResidualEmbeddingsStrided(
-            loader.codec, loader.embeddings, loader.doclens
-        )
-        n = len(lengths)
-        if args.order_method == "similar":
-            sort_partial = partial(
-                sort_similar, device=device, centroids=centroids
-            )
-        elif args.order_method == "count":
-            sort_partial = partial(
-                sort_count_vectorized,
-                doclens=loader.doclens,
-                codes=embs_strided.codes,
-                code_offsets=embs_strided.codes_strided.offsets,
-            )
-        elif args.order_method == "mean_similar":
-            sort_partial = partial(
-                sort_mean_similar, device=device, centroids=centroids
-            )
-        else:
-            raise ValueError(f"no such method: {args.order_method}")
-
-        rest_args = [
-            (all_pids[offsets[i] : offsets[i + 1]], i) for i in range(n)
-        ]
-
-        if args.jobs == 1:
-            cid_pids = list(
-                tqdm(
-                    map(sort_partial, rest_args),
-                    total=n,
-                    desc=f"Sorting centroid passages by {args.order_method}",
-                )
-            )
-        else:
-            with multiprocessing.Pool(args.jobs) as p:
-                cid_pids = list(
-                    tqdm(
-                        p.imap(sort_partial, rest_args),
-                        total=n,
-                        desc="Sorting centroid passages by "
-                        f"{args.order_method}",
-                    )
-                )
-
-        torch.save(
-            torch.nn.utils.rnn.pad_sequence(
-                cid_pids, batch_first=True, padding_value=-1.0
-            ),
+        sample_centroids(
+            index_path,
+            args.order_method,
             osp.join(index_path, args.out_filename),
+            device=args.device,
+            jobs=args.jobs,
         )
+
+
+if __name__ == "__main__":
+    main()

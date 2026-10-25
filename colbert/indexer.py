@@ -1,4 +1,5 @@
 import os
+import shutil
 import time
 
 import torch.multiprocessing as mp
@@ -7,6 +8,7 @@ from colbert.infra.run import Run
 from colbert.infra.config import ColBERTConfig, RunConfig
 from colbert.infra.launcher import Launcher
 
+from colbert.sparcent import sparcent_path
 from colbert.utils.utils import create_directory, print_message
 
 from colbert.indexing.collection_indexer import encode
@@ -42,16 +44,23 @@ class Indexer:
             delete = filename.endswith(".json")
             delete = delete and ('metadata' in filename or 'doclen' in filename or 'plan' in filename)
             delete = delete or filename.endswith(".pt")
-            
+
             if delete:
                 deleted.append(filename)
-        
+
+        # The Sparcent index is only valid for the centroids it was built on.
+        if os.path.isdir(sparcent_path(directory)):
+            deleted.append(sparcent_path(directory))
+
         if len(deleted):
             print_message(f"#> Will delete {len(deleted)} files already at {directory} in 20 seconds...")
             time.sleep(20)
 
             for filename in deleted:
-                os.remove(filename)
+                if os.path.isdir(filename):
+                    shutil.rmtree(filename)
+                else:
+                    os.remove(filename)
 
         return deleted
 
@@ -65,6 +74,13 @@ class Indexer:
         index_does_not_exist = (not os.path.exists(self.config.index_path_))
 
         assert (overwrite in [True, 'reuse', 'resume']) or index_does_not_exist, self.config.index_path_
+
+        if self.config.sparcent:
+            from colbert.sparcent.build import check_requirements
+
+            # Fail now rather than after the ColBERT indexing.
+            check_requirements(self.config)
+
         create_directory(self.config.index_path_)
 
         if overwrite is True:
@@ -72,6 +88,11 @@ class Indexer:
 
         if index_does_not_exist or overwrite != 'reuse':
             self.__launch(collection)
+
+        if self.config.sparcent:
+            from colbert.sparcent.build import build_sparcent_index
+
+            build_sparcent_index(self.config, self.index_path, collection)
 
         return self.index_path
 

@@ -130,7 +130,7 @@ class CollectionIndexer:
 
     def _sample_pids(self):
         use_cache = self.cache_path is not None
-        sp_cache_path = self.cache_path / "sampled_pids.pt"
+        sp_cache_path = self.cache_path / "sampled_pids.pt" if use_cache else None
         if use_cache and sp_cache_path.exists():
             Run().print_main(
                 f"Loading sampled_pids from cache: {sp_cache_path}"

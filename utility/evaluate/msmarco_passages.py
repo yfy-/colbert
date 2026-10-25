@@ -43,7 +43,7 @@ def main(args):
     qid2ranking = defaultdict(list)
     qid2mrr = {}
     qid2ndcg = {}
-    qid2recall = {depth: {} for depth in [50, 200, 1000, 5000, 10000]}
+    qid2recall = {depth: {} for depth in [10, 50, 100, 200, 1000, 5000, 10000]}
 
     print_message(f"#> Loading QRELs from {args.qrels} ..")
     qid2positives = (

@@ -3,7 +3,6 @@ import pathlib
 from math import ceil
 from typing import Optional
 
-import bmp
 import torch
 from torch.utils.cpp_extension import load
 
@@ -15,6 +14,7 @@ from colbert.modeling.colbert import (colbert_score, colbert_score_packed,
                                       colbert_score_reduce)
 from colbert.search.candidate_generation import CandidateGeneration
 from colbert.search.strided_tensor import StridedTensor
+from colbert.sparcent import bmp_index_path
 from colbert.utils.utils import print_message
 
 from .index_loader import IndexLoader
@@ -41,7 +41,7 @@ class IndexScorer(IndexLoader, CandidateGeneration):
         if self.filter_pids_maxscore:
             self.get_cells_func = self.get_cells_term_ub_scores
             self.__class__.filter_pids_file = "filter_pids_maxscore.cpp"
-        elif config.sparcent_index is not None:
+        elif config.sparcent or config.sparcent_index is not None:
             if (
                 config.sparcent_k_score is None
                 or config.sparcent_k_rerank is None
@@ -50,7 +50,12 @@ class IndexScorer(IndexLoader, CandidateGeneration):
             ):
                 raise ValueError("invalid sparcent index parameters")
 
-            self.sparcent_index = bmp.Searcher(config.sparcent_index)
+            # Only Sparcent search needs the BMP bindings (colbert[sparcent]).
+            import bmp
+
+            sparcent_index = config.sparcent_index or bmp_index_path(index_path)
+            print_message(f"#> Loading the Sparcent index {sparcent_index}")
+            self.sparcent_index = bmp.Searcher(sparcent_index)
             self.sparcent_k_score = config.sparcent_k_score
             self.sparcent_k_rerank = config.sparcent_k_rerank
             self.sparcent_alpha = config.sparcent_alpha

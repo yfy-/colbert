@@ -2,7 +2,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Optional, Union
+from typing import Dict, List, Optional, Union
 
 import torch
 from tqdm import tqdm
@@ -35,6 +35,8 @@ class Searcher:
         self.config = ColBERTConfig.from_existing(
             self.checkpoint_config, self.index_config, initial_config
         )
+        # Sparcent search is opt-in even if the index was built with it.
+        self.configure(sparcent=initial_config.sparcent)
 
         self.collection = Collection.cast(collection or self.config.collection)
         self.configure(checkpoint=self.checkpoint, collection=self.collection)
@@ -52,6 +54,15 @@ class Searcher:
             self.config,
             use_gpu=use_gpu,
         )
+
+        # Sparcent queries are encoded with the SPLADE model used for the
+        # centroid documents, loaded on first use.
+        self.use_sparcent = (
+            self.config.sparcent or self.config.sparcent_index is not None
+        )
+        self.splade = None
+        self.splade_tokenizer = None
+        self.splade_device = "cuda" if use_gpu else "cpu"
 
         print_memory_stats()
 
@@ -73,9 +84,48 @@ class Searcher:
             ret_tokens=ret_tokens,
         )
 
+    def encode_sparse(self, queries: List[str]) -> List[SparseQuery]:
+        """Encode queries into SPLADE term weights for the Sparcent index."""
+        from splade.sparcent.queries import encode_sparse_queries
+        from splade.sparcent.utils import load_tokenizer_and_model
+
+        if self.splade is None:
+            lora_dir = self.config.sparcent_splade_lora_dir
+            self.splade_tokenizer, self.splade = load_tokenizer_and_model(
+                self.config.sparcent_splade_model,
+                Path(lora_dir) if lora_dir else None,
+            )
+            self.splade = self.splade.to(self.splade_device)
+            self.splade.eval()
+
+        return encode_sparse_queries(
+            queries,
+            self.splade,
+            self.splade_tokenizer,
+            device=self.splade_device,
+        )
+
+    def _sparse_queries(self, queries: Queries) -> Optional[Dict]:
+        """SPLADE queries for Sparcent, unless given with the queries."""
+        if not self.use_sparcent or queries.sparse_queries:
+            return None
+
+        print_message("Encoding queries with SPLADE..")
+        sparse = self.encode_sparse(list(queries.values()))
+        return dict(zip(queries.keys(), sparse))
+
     def search(self, text: str, k=10, filter_fn=None, full_length_search=False):
-        Q = self.encode(text, full_length_search=full_length_search)
-        return self.dense_search(Q, k, filter_fn=filter_fn)
+        Q, input_ids, attention_masks = self.encode(
+            text, full_length_search=full_length_search, ret_tokens=True
+        )
+        sparse_query = self.encode_sparse([text])[0] if self.use_sparcent else None
+        return self.dense_search(
+            Q,
+            input_ids[attention_masks == 1],
+            k,
+            filter_fn=filter_fn,
+            sparse_query=sparse_query,
+        )
 
     def search_all(
         self,
@@ -92,7 +142,13 @@ class Searcher:
         )
 
         return self._search_all_Q(
-            queries, Q, input_ids, attention_masks, k, filter_fn=filter_fn
+            queries,
+            Q,
+            input_ids,
+            attention_masks,
+            k,
+            filter_fn=filter_fn,
+            sparse_queries=self._sparse_queries(queries),
         )
 
     def search_all_timed(
@@ -142,6 +198,7 @@ class Searcher:
             num_run,
             filter_fn=filter_fn,
             sparse_then_dense=sparse_then_dense,
+            sparse_queries=self._sparse_queries(queries),
         )
 
     def _search_all_Q_timed(
@@ -154,14 +211,19 @@ class Searcher:
         num_run,
         filter_fn=None,
         sparse_then_dense=False,
+        sparse_queries: Optional[Dict] = None,
     ):
         qids = list(queries.keys())
         num_q = Q.size(0)
         times = torch.zeros((num_q, num_run))
         all_scored_pids = []
+        self.ranker.tot_time = 0
         for run in tqdm(range(num_run), desc="Run loop"):
             for query_idx in tqdm(range(num_q), desc="Query loop"):
-                sparse_q = queries.sparse_query(qids[query_idx])
+                if sparse_queries is not None:
+                    sparse_q = sparse_queries[qids[query_idx]]
+                else:
+                    sparse_q = queries.sparse_query(qids[query_idx])
                 if sparse_then_dense:
                     if sparse_q is None:
                         raise ValueError(
@@ -207,6 +269,13 @@ class Searcher:
         )
         provenance.p95_latency = tail_lat[0].item()
         provenance.p99_latency = tail_lat[1].item()
+        print_message(
+            f"#> Latency (ms, min of {num_run} runs) for k={k}: "
+            f"mean={provenance.mean_latency:.1f} "
+            f"p50={provenance.median_latency:.1f} "
+            f"p95={provenance.p95_latency:.1f} "
+            f"p99={provenance.p99_latency:.1f}"
+        )
         return Ranking(data=data, provenance=provenance)
 
     def search_centroid_triplet(
@@ -232,7 +301,14 @@ class Searcher:
         return torch.concat(triplets, dim=0)
 
     def _search_all_Q(
-        self, queries, Q, input_ids, attention_masks, k, filter_fn=None
+        self,
+        queries,
+        Q,
+        input_ids,
+        attention_masks,
+        k,
+        filter_fn=None,
+        sparse_queries: Optional[Dict] = None,
     ):
         qids = list(queries.keys())
         search_start = time.time()
@@ -241,9 +317,16 @@ class Searcher:
                 zip(
                     *self.dense_search(
                         Q[query_idx : query_idx + 1],
+                        input_ids[query_idx : query_idx + 1][
+                            attention_masks[query_idx : query_idx + 1] == 1
+                        ],
                         k,
                         filter_fn=filter_fn,
-                        qid=qids[query_idx],
+                        sparse_query=(
+                            sparse_queries[qids[query_idx]]
+                            if sparse_queries is not None
+                            else queries.sparse_query(qids[query_idx])
+                        ),
                     )
                 )
             )

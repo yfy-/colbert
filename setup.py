@@ -3,6 +3,11 @@ import setuptools
 with open('README.md', 'r') as f:
     long_description = f.read()
 
+# Sources of the C++/CUDA extensions, which are compiled when first used.
+package_data = {
+    '': ['*.cpp', '*.cu'],
+}
+
 setuptools.setup(
     name='colbert',
     version='0.2.0',
@@ -16,19 +21,22 @@ setuptools.setup(
     python_requires='>=3.8',
     install_requires=[
         "bitarray",
-        "datasets",
-        "flask",
-        "git-python",
-        "python-dotenv",
+        "GitPython",
         "ninja",
         "scipy",
-        "spacy",
         "tqdm",
         "transformers",
         "ujson"
-    ], 
+    ],
     extras_require={
         'faiss-gpu': ['faiss-gpu>=1.7.0'],
-        'torch': ['torch==1.13.1']
-    }
+        'torch': ['torch==1.13.1'],
+        # Building a Sparcent index also needs the PISA tools and ciff's pisa2ciff.
+        'sparcent': [
+            'splade @ git+ssh://git@github.com/yfy-/splade.git@807887a99427c8cded4f07d9b9fd081d91a156e6',
+            'bmp @ git+ssh://git@github.com/yfy-/BMP.git@f4df7f4c8b5ed646b4bb12f51b62111198f23e51#subdirectory=python',
+        ],
+    },
+    include_package_data=True,
+    package_data=package_data,
 )
