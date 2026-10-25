@@ -36,6 +36,8 @@ setuptools.setup(
             'splade @ git+ssh://git@github.com/yfy-/splade.git@807887a99427c8cded4f07d9b9fd081d91a156e6',
             'bmp @ git+ssh://git@github.com/yfy-/BMP.git@f4df7f4c8b5ed646b4bb12f51b62111198f23e51#subdirectory=python',
         ],
+        # The gdmis-rs static pruning method.
+        'gdmis': ['gdmis @ git+ssh://git@codeberg.org/yfy/gdmis.git@763274f2e584ca5203347ba70ebeda8f33ef3da3'],
     },
     include_package_data=True,
     package_data=package_data,

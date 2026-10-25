@@ -336,8 +336,8 @@ class CollectionEncoder:
     def gdmis_rs_pruning(
         self, embs: torch.Tensor, doclens: List[int], edge_threshold=0.8
     ):
-        # Optional dependency, only needed by this pruning method.
-        import embpurisma
+        # Optional dependency (the gdmis extra), only needed by this pruning method.
+        import gdmis
 
         embs = embs.to("cpu")
         len_cumsum = np.cumsum([0] + doclens)
@@ -347,7 +347,7 @@ class CollectionEncoder:
             keep_mask[offset : offset + 2] = False
             gdmis_doclens.append(dlen - 2)
 
-        pruned_embs, pruned_doclens = embpurisma.gdmis_batch(
+        pruned_embs, pruned_doclens = gdmis.gdmis_batch(
             embs[keep_mask].detach().cpu().numpy().astype(np.float64),
             gdmis_doclens,
             edge_threshold,

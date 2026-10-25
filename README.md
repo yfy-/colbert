@@ -67,6 +67,10 @@ built with Rust). Building a Sparcent index also needs the PISA tools
 repository's `setup.sh` sets all of them up with the versions used for
 the paper.
 
+The `gdmis` extra installs the [gdmis](https://codeberg.org/yfy/gdmis)
+package, also built with Rust, which only the `gdmis-rs` static
+pruning method uses.
+
 ## Sparcent usage
 
 ```python
